@@ -1,4 +1,8 @@
 set(QL_TEST_SOURCES
+ fdmblackscholespositivity.cpp
+ fdmblackscholesspatialdiscretization.cpp
+ fdmdiscretebarrier.cpp
+ fdmdiscretebarrierengine.cpp
     americanoption.cpp
     amortizingbond.cpp
     andreasenhugevolatilityinterpl.cpp

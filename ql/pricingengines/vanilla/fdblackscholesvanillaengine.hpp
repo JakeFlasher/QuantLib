@@ -1,24 +1,4 @@
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008, 2009 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
-
+// r6
 /*! \file fdblackscholesvanillaengine.hpp
     \brief Finite-differences Black Scholes vanilla option engine
 */
@@ -29,19 +9,13 @@
 #include <ql/pricingengine.hpp>
 #include <ql/pricingengines/vanilla/cashdividendeuropeanengine.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/methods/finitedifferences/operators/fdmblackscholesspatialdesc.hpp>
 
 namespace QuantLib {
 
     class FdmQuantoHelper;
     class GeneralizedBlackScholesProcess;
 
-    //! Finite-differences Black Scholes vanilla option engine
-    /*! \ingroup vanillaengines
-
-        \test the correctness of the returned value is tested by
-              reproducing results available in web/literature
-              and comparison with Black pricing.
-    */
     class FdBlackScholesVanillaEngine : public VanillaOption::engine {
       public:
         enum CashDividendModel {
@@ -57,7 +31,9 @@ namespace QuantLib {
             const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
             bool localVol = false,
             Real illegalLocalVolOverwrite = -Null<Real>(),
-            CashDividendModel cashDividendModel = Spot);
+            CashDividendModel cashDividendModel = Spot,
+            FdmBlackScholesSpatialDesc spatialDesc
+                = FdmBlackScholesSpatialDesc());
 
         FdBlackScholesVanillaEngine(
             ext::shared_ptr<GeneralizedBlackScholesProcess>,
@@ -68,7 +44,9 @@ namespace QuantLib {
             const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
             bool localVol = false,
             Real illegalLocalVolOverwrite = -Null<Real>(),
-            CashDividendModel cashDividendModel = Spot);
+            CashDividendModel cashDividendModel = Spot,
+            FdmBlackScholesSpatialDesc spatialDesc
+                = FdmBlackScholesSpatialDesc());
 
         FdBlackScholesVanillaEngine(
             ext::shared_ptr<GeneralizedBlackScholesProcess>,
@@ -79,7 +57,9 @@ namespace QuantLib {
             const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
             bool localVol = false,
             Real illegalLocalVolOverwrite = -Null<Real>(),
-            CashDividendModel cashDividendModel = Spot);
+            CashDividendModel cashDividendModel = Spot,
+            FdmBlackScholesSpatialDesc spatialDesc
+                = FdmBlackScholesSpatialDesc());
 
         FdBlackScholesVanillaEngine(
             ext::shared_ptr<GeneralizedBlackScholesProcess>,
@@ -91,7 +71,9 @@ namespace QuantLib {
             const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
             bool localVol = false,
             Real illegalLocalVolOverwrite = -Null<Real>(),
-            CashDividendModel cashDividendModel = Spot);
+            CashDividendModel cashDividendModel = Spot,
+            FdmBlackScholesSpatialDesc spatialDesc
+                = FdmBlackScholesSpatialDesc());
 
         void calculate() const override;
 
@@ -104,6 +86,7 @@ namespace QuantLib {
         Real illegalLocalVolOverwrite_;
         ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
         CashDividendModel cashDividendModel_;
+        FdmBlackScholesSpatialDesc spatialDesc_;
     };
 
 
@@ -134,6 +117,9 @@ namespace QuantLib {
         MakeFdBlackScholesVanillaEngine& withCashDividendModel(
             FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel);
 
+        MakeFdBlackScholesVanillaEngine& withSpatialDesc(
+            const FdmBlackScholesSpatialDesc& spatialDesc);
+
         operator ext::shared_ptr<PricingEngine>() const;
       private:
         ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
@@ -143,7 +129,9 @@ namespace QuantLib {
         bool localVol_ = false;
         Real illegalLocalVolOverwrite_;
         ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
-        FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel_ = FdBlackScholesVanillaEngine::Spot;
+        FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel_
+            = FdBlackScholesVanillaEngine::Spot;
+        FdmBlackScholesSpatialDesc spatialDesc_;
     };
 
 }

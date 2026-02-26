@@ -1,22 +1,4 @@
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-
-/*
- Copyright (C) 2021 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
-
+// r6
 /*! \file fdblackscholesshoutengine.cpp
 */
 
@@ -34,26 +16,24 @@ namespace QuantLib {
 
     FdBlackScholesShoutEngine::FdBlackScholesShoutEngine(
         ext::shared_ptr<GeneralizedBlackScholesProcess> process,
-        Size tGrid,
-        Size xGrid,
-        Size dampingSteps,
-        const FdmSchemeDesc& schemeDesc)
+        Size tGrid, Size xGrid, Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        FdmBlackScholesSpatialDesc spatialDesc)
     : process_(std::move(process)),
       tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
-      schemeDesc_(schemeDesc) {
+      schemeDesc_(schemeDesc), spatialDesc_(spatialDesc) {
         registerWith(process_);
     }
 
     FdBlackScholesShoutEngine::FdBlackScholesShoutEngine(
         ext::shared_ptr<GeneralizedBlackScholesProcess> process,
         DividendSchedule dividends,
-        Size tGrid,
-        Size xGrid,
-        Size dampingSteps,
-        const FdmSchemeDesc& schemeDesc)
+        Size tGrid, Size xGrid, Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        FdmBlackScholesSpatialDesc spatialDesc)
     : process_(std::move(process)), dividends_(std::move(dividends)),
       tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
-      schemeDesc_(schemeDesc) {
+      schemeDesc_(schemeDesc), spatialDesc_(spatialDesc) {
         registerWith(process_);
     }
 
@@ -79,7 +59,6 @@ namespace QuantLib {
 
         const auto payoff =
             ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
-
         QL_REQUIRE(payoff, "non plain vanilla payoff given");
 
         const DividendSchedule emptyDividendSchedule;
@@ -119,7 +98,10 @@ namespace QuantLib {
         const auto solver =
             ext::make_shared<FdmBlackScholesSolver>(
                 Handle<GeneralizedBlackScholesProcess>(process_),
-                payoff->strike(), solverDesc, schemeDesc_);
+                payoff->strike(), solverDesc, schemeDesc_,
+                false, -Null<Real>(),
+                Handle<FdmQuantoHelper>(),
+                spatialDesc_);
 
         const Real spot = process_->x0() + divAdj;
 

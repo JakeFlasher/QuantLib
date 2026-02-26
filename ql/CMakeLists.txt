@@ -1,4 +1,6 @@
 set(QL_SOURCES
+ methods/finitedifferences/stepconditions/fdmdiscretebarrierstepcondition.cpp
+ pricingengines/barrier/makefdblackscholesbarrierengine.cpp
     cashflow.cpp
     cashflows/averagebmacoupon.cpp
     cashflows/blackovernightindexedcouponpricer.cpp
@@ -952,6 +954,11 @@ set(QL_SOURCES
 )
 
 set(QL_HEADERS
+   methods/finitedifferences/operators/fdmblackscholesspatialdesc.hpp
+ methods/finitedifferences/operators/fdmhyperboliccot.hpp
+ methods/finitedifferences/operators/fdmmatrixdiagnostic.hpp
+ methods/finitedifferences/stepconditions/fdmdiscretebarrierstepcondition.hpp
+ pricingengines/barrier/makefdblackscholesbarrierengine.hpp
     any.hpp
     auto_link.hpp
     cashflow.hpp

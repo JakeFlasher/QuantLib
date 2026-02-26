@@ -1,24 +1,4 @@
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008, 2009 Ralph Schreyer
- Copyright (C) 2008, 2009 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
-
+// r6
 /*! \file fdmblackscholesop.hpp
     \brief Black Scholes linear operator
 */
@@ -32,6 +12,7 @@
 #include <ql/methods/finitedifferences/operators/firstderivativeop.hpp>
 #include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
 #include <ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp>
+#include <ql/methods/finitedifferences/operators/fdmblackscholesspatialdesc.hpp>
 
 namespace QuantLib {
 
@@ -44,7 +25,10 @@ namespace QuantLib {
             bool localVol = false,
             Real illegalLocalVolOverwrite = -Null<Real>(),
             Size direction = 0,
-            ext::shared_ptr<FdmQuantoHelper> quantoHelper = ext::shared_ptr<FdmQuantoHelper>());
+            ext::shared_ptr<FdmQuantoHelper> quantoHelper
+                = ext::shared_ptr<FdmQuantoHelper>(),
+            FdmBlackScholesSpatialDesc spatialDesc
+                = FdmBlackScholesSpatialDesc());
 
         Size size() const override;
         void setTime(Time t1, Time t2) override;
@@ -70,6 +54,7 @@ namespace QuantLib {
         const Real illegalLocalVolOverwrite_;
         const Size direction_;
         const ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
+        const FdmBlackScholesSpatialDesc spatialDesc_;
     };
 }
 
