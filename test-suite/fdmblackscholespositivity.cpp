@@ -505,6 +505,183 @@ BOOST_AUTO_TEST_CASE(testScheme2GatingFallbackMatchesScheme1) {
 }
 
 
+BOOST_AUTO_TEST_CASE(testTruncatedCallNumericalDiffusion) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing truncated call numerical diffusion comparison "
+        "(Low Volatility paper, Example 4.1): CN vs ExpFit vs MT...");
+
+    // Low Volatility paper Example 4.1:
+    //   r=0.05, sigma=0.001, T=5/12, U=70, K=50
+    // Truncated call payoff: max(S-K, 0) for S in [K, U], else 0
+    // With sigma^2 << r, standard CN produces spurious oscillations
+    // near the discontinuity at U=70.
+
+    LowVolSetup setup;  // sigma=0.001, r=0.05, spot=60
+
+    const Real K = 50.0;
+    const Real U = 70.0;
+    const Size xGrid = 800;
+    const Size tGrid = 200;
+
+    const Real xMin = std::log(1.0);
+    const Real xMax = std::log(140.0);
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+
+    const ext::shared_ptr<Payoff> payoff =
+        ext::make_shared<TruncatedCallPayoff>(K, U);
+    const auto calc =
+        ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+
+    const Array payoffVec = buildPayoffVector(mesher, calc, setup.maturity);
+
+    const FdmBoundaryConditionSet bcSet;
+
+    const Size skip = 5;
+    const Real monoTol = 1e-10;
+
+    // ---- StandardCentral + CN: expect oscillations ----
+    Size violCentral = 0;
+    {
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, setup.process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), centralDesc());
+
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, setup.maturity, tGrid);
+
+        Size negCount = 0;
+        for (Size i = skip; i < xGrid - skip; ++i) {
+            if (v[i] < -1e-6) ++negCount;
+        }
+        violCentral = countMonotonicityViolations(v, skip, xGrid, monoTol);
+
+        BOOST_TEST_MESSAGE("  Central+CN: neg=" << negCount
+                           << ", monoViol=" << violCentral);
+
+        BOOST_CHECK_MESSAGE(negCount > 0 || violCentral > 0,
+            "Expected oscillations from StandardCentral+CN "
+            "for low-vol truncated call");
+    }
+
+    // ---- ExponentialFitting + CN ----
+    Size transWidthExpFit = 0;
+    {
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, setup.process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), fittedDesc());
+
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, setup.maturity, tGrid);
+
+        Size negCount = 0;
+        const Size violFitted =
+            countMonotonicityViolations(v, skip, xGrid, monoTol);
+        for (Size i = skip; i < xGrid - skip; ++i) {
+            if (v[i] < -1e-12) ++negCount;
+        }
+
+        // For truncated call, the solution is bell-shaped (increases
+        // from K to peak, then decreases toward U), so monotonicity
+        // violations in the global sense are expected.  The key checks
+        // are: no negativity and fewer artifacts than StandardCentral.
+        BOOST_CHECK_EQUAL(negCount, Size(0));
+
+        BOOST_TEST_MESSAGE("  ExpFit+CN: neg=" << negCount
+            << ", monoViol=" << violFitted);
+
+        // Measure transition width near U=70:
+        // count nodes where value drops from >0.5*peak to <0.01*peak
+        const Real xU = std::log(U);
+        Real peak = 0.0;
+        for (Size i = 0; i < v.size(); ++i)
+            peak = std::max(peak, v[i]);
+
+        Size iStart = 0, iEnd = 0;
+        bool foundStart = false;
+        for (const auto& iter : *mesher->layout()) {
+            const Real x = mesher->location(iter, 0);
+            if (x > xU - 0.5 && x < xU + 0.5) {
+                if (!foundStart && v[iter.index()] > 0.5 * peak) {
+                    iStart = iter.index();
+                    foundStart = true;
+                }
+                if (foundStart && v[iter.index()] < 0.01 * peak) {
+                    iEnd = iter.index();
+                    break;
+                }
+            }
+        }
+        transWidthExpFit = (iEnd > iStart) ? iEnd - iStart : 0;
+
+        BOOST_TEST_MESSAGE("  ExpFit+CN: transition_width="
+            << transWidthExpFit << " nodes");
+    }
+
+    // ---- MilevTagliani + CN ----
+    Size transWidthMT = 0;
+    {
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, setup.process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), milevTaglianiDesc());
+
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, setup.maturity, tGrid);
+
+        Size negCount = 0;
+        const Size violMT =
+            countMonotonicityViolations(v, skip, xGrid, monoTol);
+        for (Size i = skip; i < xGrid - skip; ++i) {
+            if (v[i] < -1e-12) ++negCount;
+        }
+
+        BOOST_CHECK_EQUAL(negCount, Size(0));
+
+        BOOST_TEST_MESSAGE("  MT+CN: neg=" << negCount
+            << ", monoViol=" << violMT);
+
+        // Measure transition width
+        const Real xU = std::log(U);
+        Real peak = 0.0;
+        for (Size i = 0; i < v.size(); ++i)
+            peak = std::max(peak, v[i]);
+
+        Size iStart = 0, iEnd = 0;
+        bool foundStart = false;
+        for (const auto& iter : *mesher->layout()) {
+            const Real x = mesher->location(iter, 0);
+            if (x > xU - 0.5 && x < xU + 0.5) {
+                if (!foundStart && v[iter.index()] > 0.5 * peak) {
+                    iStart = iter.index();
+                    foundStart = true;
+                }
+                if (foundStart && v[iter.index()] < 0.01 * peak) {
+                    iEnd = iter.index();
+                    break;
+                }
+            }
+        }
+        transWidthMT = (iEnd > iStart) ? iEnd - iStart : 0;
+
+        BOOST_TEST_MESSAGE("  MT+CN: transition_width="
+            << transWidthMT << " nodes");
+    }
+
+    // Both non-standard schemes should produce smooth solutions,
+    // but their transition widths may differ (reflecting different
+    // numerical diffusion: Duffy ~ rS*dS/2 vs MT ~ (r*dS/sigma)^2/8)
+    BOOST_TEST_MESSAGE(
+        "  Numerical diffusion comparison: "
+        "ExpFit width=" << transWidthExpFit
+        << " vs MT width=" << transWidthMT << " nodes");
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()

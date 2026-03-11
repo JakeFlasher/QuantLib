@@ -37,6 +37,7 @@
 #include <boost/test/unit_test.hpp>
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <list>
 #include <vector>
 
@@ -688,6 +689,331 @@ BOOST_AUTO_TEST_CASE(testLowVolDoubleBarrierOscillation) {
             BOOST_CHECK(std::isfinite(rhs[i]));
         }
     }
+}
+
+
+// ===================================================================
+// 8. Paper Table 1 — tighter replication at interior spot levels
+//    (Milev-Tagliani Example 4.1: K=100, L=95, U=110,
+//     sigma=0.25, r=0.05, T=0.5, 5 monitoring dates)
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testDoubleBarrierKnockOutTable1Interior) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing discrete double barrier knock-out: "
+        "Table 1 interior spot levels against MC reference...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real K = 100.0;
+    const Real L = 95.0;
+    const Real U = 110.0;
+    const Volatility sigma = 0.25;
+    const Rate r = 0.05;
+    const Rate q = 0.0;
+    const Time maturity = 0.5;
+
+    std::vector<Time> monTimes;
+    for (Size i = 1; i <= 5; ++i)
+        monTimes.push_back(maturity * Real(i) / 5.0);
+
+    auto process = makeBSProcess(100.0, r, q, sigma);
+
+    const Size xGrid = 4000;
+    const Size tGrid = 2000;
+
+    std::vector<std::tuple<Real, Real, bool>> cPoints = {
+        {K, 0.1, true}, {L, 0.1, true}, {U, 0.1, true}
+    };
+
+    auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
+        xGrid, process, maturity, K,
+        Null<Real>(), Null<Real>(), 0.0001, 1.5, cPoints);
+    auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
+
+    ext::shared_ptr<StrikedTypePayoff> payoff =
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K);
+
+    auto barrierCondition =
+        ext::make_shared<FdmDiscreteBarrierStepCondition>(
+            mesher, monTimes, L, U);
+    auto conditions = ext::make_shared<FdmStepConditionComposite>(
+        std::list<std::vector<Time>>(1, monTimes),
+        FdmStepConditionComposite::Conditions(1, barrierCondition));
+
+    const FdmBoundaryConditionSet bcSet;
+
+    // Paper MC reference (Table 1, standard error in parentheses):
+    //   V(99.5)  = 0.22923 (0.00073)
+    //   V(100)   = 0.23263 (0.00036)
+    //   V(100.5) = 0.23410 (0.00073)
+    struct SpotRef { Real spot; Real mcRef; };
+    const SpotRef refs[] = {
+        { 99.5,  0.22923},
+        {100.0,  0.23263},
+        {100.5,  0.23410}
+    };
+
+    const Real relTol = 0.05;  // 5% relative tolerance
+
+    // Helper lambda: run a scheme and return values at reference spots
+    auto runScheme = [&](const FdmBlackScholesSpatialDesc& desc,
+                         const char* name) {
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), Size(0),
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        Array rhs = buildPayoff(mesher, payoff);
+        FdmBackwardSolver solver(op, bcSet, conditions,
+                                 FdmSchemeDesc::CrankNicolson());
+        solver.rollback(rhs, maturity, 0.0, tGrid, 0);
+
+        std::ostringstream oss;
+        oss << "  " << name << ":";
+        for (const auto& ref : refs) {
+            const Real v = valueAtSpot(rhs, mesher, ref.spot);
+            oss << "  V(" << ref.spot << ")=" << v;
+        }
+        BOOST_TEST_MESSAGE(oss.str());
+
+        return rhs;
+    };
+
+    // Run all three schemes
+    BOOST_TEST_MESSAGE("  Paper MC references: "
+        "V(99.5)=0.22923, V(100)=0.23263, V(100.5)=0.23410");
+
+    Array rhsExpFit = runScheme(fittedDesc(), "ExpFit+CN");
+    Array rhsMT     = runScheme(milevTaglianiDesc(), "MT+CN");
+
+    // Check ExpFit and MT values against MC references
+    for (const auto& ref : refs) {
+        const Real vExpFit = valueAtSpot(rhsExpFit, mesher, ref.spot);
+        const Real vMT     = valueAtSpot(rhsMT, mesher, ref.spot);
+
+        BOOST_CHECK_MESSAGE(
+            std::fabs(vExpFit - ref.mcRef) / ref.mcRef < relTol,
+            "ExpFit V(" << ref.spot << ")=" << vExpFit
+            << " differs from MC ref " << ref.mcRef
+            << " by more than " << (relTol * 100) << "%");
+
+        BOOST_CHECK_MESSAGE(
+            std::fabs(vMT - ref.mcRef) / ref.mcRef < relTol,
+            "MT V(" << ref.spot << ")=" << vMT
+            << " differs from MC ref " << ref.mcRef
+            << " by more than " << (relTol * 100) << "%");
+    }
+}
+
+
+// ===================================================================
+// 9. Three-scheme comparison output
+//    Outputs formatted table for all three schemes at multiple spots
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testThreeSchemeComparisonOutput) {
+
+    BOOST_TEST_MESSAGE(
+        "Three-scheme comparison: StandardCentral vs "
+        "ExponentialFitting vs MilevTagliani CN variant...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real K = 100.0;
+    const Real L = 95.0;
+    const Real U = 110.0;
+    const Volatility sigma = 0.25;
+    const Rate r = 0.05;
+    const Time maturity = 0.5;
+
+    std::vector<Time> monTimes;
+    for (Size i = 1; i <= 5; ++i)
+        monTimes.push_back(maturity * Real(i) / 5.0);
+
+    auto process = makeBSProcess(100.0, r, 0.0, sigma);
+
+    const Size xGrid = 2000;
+    const Size tGrid = 500;
+
+    std::vector<std::tuple<Real, Real, bool>> cPoints = {
+        {K, 0.1, true}, {L, 0.1, true}, {U, 0.1, true}
+    };
+    auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
+        xGrid, process, maturity, K,
+        Null<Real>(), Null<Real>(), 0.0001, 1.5, cPoints);
+    auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
+
+    ext::shared_ptr<StrikedTypePayoff> payoff =
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K);
+
+    auto barrierCondition =
+        ext::make_shared<FdmDiscreteBarrierStepCondition>(
+            mesher, monTimes, L, U);
+    auto conditions = ext::make_shared<FdmStepConditionComposite>(
+        std::list<std::vector<Time>>(1, monTimes),
+        FdmStepConditionComposite::Conditions(1, barrierCondition));
+
+    const FdmBoundaryConditionSet bcSet;
+
+    // Evaluate spots spanning the barrier corridor interior
+    const Real spots[] = {96, 98, 99, 99.5, 100, 100.5,
+                          101, 102, 104, 106, 108, 109};
+
+    // MC references from Table 1 (where available)
+    // S:     95    95.5   99.5   100    100.5  109.5  110
+    // MC: 0.17359 0.18291 0.22923 0.23263 0.23410 0.17426 0.16712
+
+    auto solve = [&](const FdmBlackScholesSpatialDesc& desc) {
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), Size(0),
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+        Array rhs = buildPayoff(mesher, payoff);
+        FdmBackwardSolver solver(op, bcSet, conditions,
+                                 FdmSchemeDesc::CrankNicolson());
+        solver.rollback(rhs, maturity, 0.0, tGrid, 0);
+        return rhs;
+    };
+
+    FdmBlackScholesSpatialDesc cDesc = centralDesc();
+    cDesc.mMatrixPolicy =
+        FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+    Array rhsCentral = solve(cDesc);
+    Array rhsExpFit  = solve(fittedDesc());
+    Array rhsMT      = solve(milevTaglianiDesc());
+
+    BOOST_TEST_MESSAGE(
+        "  S       | Central+CN  | ExpFit+CN   | MT+CN");
+    BOOST_TEST_MESSAGE(
+        "  --------|-------------|-------------|-------------");
+
+    for (Real s : spots) {
+        const Real vc = valueAtSpot(rhsCentral, mesher, s);
+        const Real ve = valueAtSpot(rhsExpFit, mesher, s);
+        const Real vm = valueAtSpot(rhsMT, mesher, s);
+
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(5);
+        oss << "  " << std::setw(7) << s
+            << " | " << std::setw(11) << vc
+            << " | " << std::setw(11) << ve
+            << " | " << std::setw(11) << vm;
+        BOOST_TEST_MESSAGE(oss.str());
+
+        // All values in the barrier corridor should be finite
+        // and non-negative for the non-standard schemes
+        BOOST_CHECK(std::isfinite(ve));
+        BOOST_CHECK(std::isfinite(vm));
+        BOOST_CHECK_MESSAGE(ve >= -1e-10,
+            "ExpFit negative at S=" << s << ": " << ve);
+        BOOST_CHECK_MESSAGE(vm >= -1e-10,
+            "MT negative at S=" << s << ": " << vm);
+    }
+}
+
+
+// ===================================================================
+// 10. Grid convergence study
+//     Shows V(100) converges as grid refines under ExpFit+CN
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testGridConvergenceStudy) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing grid convergence for discrete double barrier "
+        "knock-out (ExpFit+CN)...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real K = 100.0;
+    const Real L = 95.0;
+    const Real U = 110.0;
+    const Volatility sigma = 0.25;
+    const Rate r = 0.05;
+    const Time maturity = 0.5;
+
+    std::vector<Time> monTimes;
+    for (Size i = 1; i <= 5; ++i)
+        monTimes.push_back(maturity * Real(i) / 5.0);
+
+    auto process = makeBSProcess(100.0, r, 0.0, sigma);
+
+    // Grid levels: coarse, medium, fine
+    struct GridLevel { Size xGrid; Size tGrid; const char* label; };
+    const GridLevel levels[] = {
+        { 500, 125, "Coarse (500x125)"},
+        {1000, 250, "Medium (1000x250)"},
+        {2000, 500, "Fine   (2000x500)"}
+    };
+
+    std::vector<Real> values;
+
+    for (const auto& level : levels) {
+        std::vector<std::tuple<Real, Real, bool>> cPoints = {
+            {K, 0.1, true}, {L, 0.1, true}, {U, 0.1, true}
+        };
+        auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
+            level.xGrid, process, maturity, K,
+            Null<Real>(), Null<Real>(), 0.0001, 1.5, cPoints);
+        auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
+
+        ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::make_shared<PlainVanillaPayoff>(Option::Call, K);
+
+        auto barrierCondition =
+            ext::make_shared<FdmDiscreteBarrierStepCondition>(
+                mesher, monTimes, L, U);
+        auto conditions = ext::make_shared<FdmStepConditionComposite>(
+            std::list<std::vector<Time>>(1, monTimes),
+            FdmStepConditionComposite::Conditions(1, barrierCondition));
+
+        const FdmBoundaryConditionSet bcSet;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), Size(0),
+            ext::shared_ptr<FdmQuantoHelper>(), fittedDesc());
+
+        Array rhs = buildPayoff(mesher, payoff);
+        FdmBackwardSolver solver(op, bcSet, conditions,
+                                 FdmSchemeDesc::CrankNicolson());
+        solver.rollback(rhs, maturity, 0.0, level.tGrid, 0);
+
+        const Real v100 = valueAtSpot(rhs, mesher, 100.0);
+        values.push_back(v100);
+
+        BOOST_TEST_MESSAGE("  " << level.label
+                           << ":  V(100) = " << v100);
+    }
+
+    // Convergence check: finer grids should be closer to MC reference
+    const Real mcRef = 0.23263;
+    if (values.size() == 3) {
+        const Real err0 = std::fabs(values[0] - mcRef);
+        const Real err1 = std::fabs(values[1] - mcRef);
+        const Real err2 = std::fabs(values[2] - mcRef);
+
+        BOOST_TEST_MESSAGE("  |V_coarse - MC| = " << err0);
+        BOOST_TEST_MESSAGE("  |V_medium - MC| = " << err1);
+        BOOST_TEST_MESSAGE("  |V_fine   - MC| = " << err2);
+
+        BOOST_CHECK_MESSAGE(err2 < err0,
+            "Convergence check failed: finest grid error ("
+            << err2 << ") should be less than coarsest ("
+            << err0 << ")");
+    }
+
+    // The fine-grid value should be close to MC reference 0.23263
+    BOOST_CHECK_MESSAGE(
+        std::fabs(values.back() - 0.23263) / 0.23263 < 0.05,
+        "Fine-grid V(100)=" << values.back()
+        << " differs from MC ref 0.23263 by more than 5%");
 }
 
 
