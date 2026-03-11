@@ -31,6 +31,7 @@
 #include <ql/pricingengines/barrier/fdblackscholesbarrierengine.hpp>
 #include <ql/pricingengines/barrier/makefdblackscholesbarrierengine.hpp>
 #include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
+#include <ql/pricingengines/vanilla/fdblackscholesshoutengine.hpp>
 #include <ql/pricingengines/vanilla/fdblackscholesvanillaengine.hpp>
 #include <ql/processes/blackscholesprocess.hpp>
 #include <ql/quotes/simplequote.hpp>
@@ -1179,6 +1180,66 @@ BOOST_AUTO_TEST_CASE(testContinuousBarrierNonRegression) {
         BOOST_CHECK_MESSAGE(relErr < 0.02,
             "ExpFit barrier error " << relErr << " exceeds 2%");
     }
+}
+
+
+// ===================================================================
+// 13. Shout engine smoke test with spatialDesc
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testShoutEngineSmokeTest) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing FdBlackScholesShoutEngine with "
+        "ExponentialFitting spatial scheme...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real spot = 100.0;
+    const Rate r = 0.05;
+    const Volatility vol = 0.20;
+    const Real K = 100.0;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(spot)),
+        Handle<YieldTermStructure>(flatRate(today, 0.0, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    const Date exerciseDate = today + Period(12, Months);
+    const auto exercise =
+        ext::make_shared<EuropeanExercise>(exerciseDate);
+    const auto payoff =
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K);
+
+    // European reference
+    VanillaOption euroOption(payoff, exercise);
+    euroOption.setPricingEngine(
+        ext::make_shared<AnalyticEuropeanEngine>(process));
+    const Real euroValue = euroOption.NPV();
+
+    // Shout option with ExponentialFitting
+    VanillaOption shoutOption(payoff, exercise);
+    shoutOption.setPricingEngine(
+        ext::make_shared<FdBlackScholesShoutEngine>(
+            process, 100, 400, 0,
+            FdmSchemeDesc::CrankNicolson(),
+            FdmBlackScholesSpatialDesc::exponentialFitting()));
+
+    const Real shoutValue = shoutOption.NPV();
+
+    BOOST_TEST_MESSAGE("  European: NPV=" << euroValue);
+    BOOST_TEST_MESSAGE("  Shout:    NPV=" << shoutValue);
+
+    BOOST_CHECK_MESSAGE(std::isfinite(shoutValue),
+        "Shout value is not finite: " << shoutValue);
+    BOOST_CHECK_MESSAGE(shoutValue > 0.0,
+        "Shout value should be positive: " << shoutValue);
+    BOOST_CHECK_MESSAGE(shoutValue >= euroValue - 0.01,
+        "Shout value (" << shoutValue
+        << ") should be >= European value (" << euroValue << ")");
 }
 
 

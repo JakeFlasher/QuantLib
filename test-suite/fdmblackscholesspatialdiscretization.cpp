@@ -519,6 +519,64 @@ BOOST_AUTO_TEST_CASE(testMMatrixSignChecksDetailed) {
 
 
 // ===================================================================
+// ModTripleBandLinearOp mutation test
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testModTripleBandLinearOpMutation) {
+    BOOST_TEST_MESSAGE(
+        "Testing ModTripleBandLinearOp coefficient mutation...");
+
+    const Size xGrid = 10;
+    auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(0.0, 1.0, xGrid));
+
+    // Create a ModTripleBandLinearOp (second derivative stencil)
+    ModTripleBandLinearOp op(0, mesher);
+
+    // Initialize with known pattern: lower=1, diag=-2, upper=1
+    for (Size i = 0; i < xGrid; ++i) {
+        op.lower(i) = 1.0;
+        op.diag(i) = -2.0;
+        op.upper(i) = 1.0;
+    }
+
+    // Verify initial values
+    const Size idx = 5;
+    BOOST_CHECK_EQUAL(op.lower(idx), 1.0);
+    BOOST_CHECK_EQUAL(op.diag(idx), -2.0);
+    BOOST_CHECK_EQUAL(op.upper(idx), 1.0);
+
+    // Mutate at index 5
+    op.lower(idx) = 3.14;
+    op.diag(idx) = -6.28;
+    op.upper(idx) = 2.72;
+
+    // Verify mutation took effect
+    BOOST_CHECK_EQUAL(op.lower(idx), 3.14);
+    BOOST_CHECK_EQUAL(op.diag(idx), -6.28);
+    BOOST_CHECK_EQUAL(op.upper(idx), 2.72);
+
+    // Verify neighbors unchanged
+    BOOST_CHECK_EQUAL(op.lower(idx - 1), 1.0);
+    BOOST_CHECK_EQUAL(op.upper(idx + 1), 1.0);
+    BOOST_CHECK_EQUAL(op.diag(idx + 1), -2.0);
+
+    // Verify apply() consistency: apply on unit vector e_idx
+    // should produce row idx of the matrix
+    Array e(xGrid, 0.0);
+    e[idx] = 1.0;
+    Array result = op.apply(e);
+
+    // Row idx-1 should have upper[idx-1]*1 = 1.0 (since e[idx]=1)
+    BOOST_CHECK_CLOSE(result[idx - 1], op.upper(idx - 1), 1e-10);
+    // Row idx should have diag[idx]*1 = -6.28
+    BOOST_CHECK_CLOSE(result[idx], op.diag(idx), 1e-10);
+    // Row idx+1 should have lower[idx+1]*1 = 1.0
+    BOOST_CHECK_CLOSE(result[idx + 1], op.lower(idx + 1), 1e-10);
+}
+
+
+// ===================================================================
 // Operator coefficient verification
 // ===================================================================
 
