@@ -27,9 +27,11 @@
 #include <ql/methods/finitedifferences/stepconditions/fdmdiscretebarrierstepcondition.hpp>
 #include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
 #include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/pricingengines/barrier/analyticbarrierengine.hpp>
 #include <ql/pricingengines/barrier/fdblackscholesbarrierengine.hpp>
 #include <ql/pricingengines/barrier/makefdblackscholesbarrierengine.hpp>
 #include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
+#include <ql/pricingengines/vanilla/fdblackscholesvanillaengine.hpp>
 #include <ql/processes/blackscholesprocess.hpp>
 #include <ql/quotes/simplequote.hpp>
 #include <ql/time/daycounters/actual365fixed.hpp>
@@ -1014,6 +1016,169 @@ BOOST_AUTO_TEST_CASE(testGridConvergenceStudy) {
         std::fabs(values.back() - 0.23263) / 0.23263 < 0.05,
         "Fine-grid V(100)=" << values.back()
         << " differs from MC ref 0.23263 by more than 5%");
+}
+
+
+// ===================================================================
+// 11. Vanilla European vs Black-Scholes analytical formula
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testVanillaEuropeanAgainstAnalytical) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing FD vanilla European call against "
+        "Black-Scholes analytical formula...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real spot = 100.0;
+    const Rate r = 0.05;
+    const Rate q = 0.0;
+    const Volatility vol = 0.20;
+    const Real K = 100.0;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(spot)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    const Date exerciseDate = today + Period(12, Months);
+    const auto exercise =
+        ext::make_shared<EuropeanExercise>(exerciseDate);
+    const auto payoff =
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K);
+
+    // Analytical reference
+    VanillaOption refOption(payoff, exercise);
+    refOption.setPricingEngine(
+        ext::make_shared<AnalyticEuropeanEngine>(process));
+    const Real refValue = refOption.NPV();
+    const Real refDelta = refOption.delta();
+
+    BOOST_TEST_MESSAGE("  Analytical: NPV=" << refValue
+                       << ", delta=" << refDelta);
+
+    // Test each spatial scheme via FdBlackScholesVanillaEngine
+    FdmBlackScholesSpatialDesc schemes[] = {
+        FdmBlackScholesSpatialDesc::standard(),
+        FdmBlackScholesSpatialDesc::exponentialFitting(),
+        FdmBlackScholesSpatialDesc::milevTaglianiCN()
+    };
+    const char* names[] = {"Central", "ExpFit", "MT"};
+
+    for (Size s = 0; s < 3; ++s) {
+        VanillaOption option(payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesVanillaEngine>(
+                process, 200, 1000, 0,
+                FdmSchemeDesc::CrankNicolson(),
+                false, -Null<Real>(),
+                FdBlackScholesVanillaEngine::Spot,
+                schemes[s]));
+
+        const Real fdValue = option.NPV();
+        const Real fdDelta = option.delta();
+
+        const Real relErr = std::fabs(fdValue - refValue) / refValue;
+        const Real deltaErr = std::fabs(fdDelta - refDelta) / std::fabs(refDelta);
+
+        BOOST_TEST_MESSAGE("  " << names[s]
+            << ": NPV=" << fdValue << " (err=" << relErr * 100 << "%)"
+            << ", delta=" << fdDelta << " (err=" << deltaErr * 100 << "%)");
+
+        BOOST_CHECK_MESSAGE(relErr < 0.01,
+            names[s] << " price error " << relErr
+            << " exceeds 1% threshold");
+        BOOST_CHECK_MESSAGE(deltaErr < 0.05,
+            names[s] << " delta error " << deltaErr
+            << " exceeds 5% threshold");
+    }
+}
+
+
+// ===================================================================
+// 12. Continuous barrier non-regression with spatialDesc
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testContinuousBarrierNonRegression) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing continuous barrier engine does not regress "
+        "when spatialDesc is passed...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real spot = 100.0;
+    const Rate r = 0.05;
+    const Volatility vol = 0.25;
+    const Real K = 100.0;
+    const Real barrier = 90.0;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(spot)),
+        Handle<YieldTermStructure>(flatRate(today, 0.0, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    const Date exerciseDate = today + Period(6, Months);
+    const auto exercise =
+        ext::make_shared<EuropeanExercise>(exerciseDate);
+    const auto payoff =
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K);
+
+    // Analytical reference (continuous barrier)
+    BarrierOption refOption(Barrier::DownOut, barrier, 0.0,
+                            payoff, exercise);
+    refOption.setPricingEngine(
+        ext::make_shared<AnalyticBarrierEngine>(process));
+    const Real refValue = refOption.NPV();
+
+    BOOST_TEST_MESSAGE("  Analytical DownOut: NPV=" << refValue);
+
+    // FD with StandardCentral
+    {
+        BarrierOption option(Barrier::DownOut, barrier, 0.0,
+                             payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, 200, 800, 0,
+                FdmSchemeDesc::CrankNicolson(),
+                false, -Null<Real>(),
+                FdmBlackScholesSpatialDesc::standard()));
+
+        const Real fdValue = option.NPV();
+        const Real relErr = std::fabs(fdValue - refValue) / refValue;
+
+        BOOST_TEST_MESSAGE("  Central: NPV=" << fdValue
+            << " (err=" << relErr * 100 << "%)");
+        BOOST_CHECK_MESSAGE(relErr < 0.02,
+            "Central barrier error " << relErr << " exceeds 2%");
+    }
+
+    // FD with ExponentialFitting
+    {
+        BarrierOption option(Barrier::DownOut, barrier, 0.0,
+                             payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, 200, 800, 0,
+                FdmSchemeDesc::CrankNicolson(),
+                false, -Null<Real>(),
+                FdmBlackScholesSpatialDesc::exponentialFitting()));
+
+        const Real fdValue = option.NPV();
+        const Real relErr = std::fabs(fdValue - refValue) / refValue;
+
+        BOOST_TEST_MESSAGE("  ExpFit: NPV=" << fdValue
+            << " (err=" << relErr * 100 << "%)");
+        BOOST_CHECK_MESSAGE(relErr < 0.02,
+            "ExpFit barrier error " << relErr << " exceeds 2%");
+    }
 }
 
 

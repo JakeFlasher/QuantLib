@@ -409,6 +409,300 @@ BOOST_AUTO_TEST_CASE(testScheme2WithCNScheme) {
         "but found " << negCount << " violations");
 }
 
+// ===================================================================
+// M-matrix sign checks: detailed violation counting with tolerance
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testMMatrixSignChecksDetailed) {
+    BOOST_TEST_MESSAGE(
+        "Testing M-matrix sign checks: violation counting, "
+        "tolerance, and scheme comparison...");
+
+    auto process = makeProcess(100.0, 0.05, 0.0, 0.001);
+
+    const Size xGrid = 60;
+    const Time maturity = 1.0;
+    const Real strike = 100.0;
+
+    auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
+        xGrid, process, maturity, strike);
+    auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
+    const Size n = mesher->layout()->size();
+    const Time dt = maturity / 50.0;
+
+    // StandardCentral at low vol should have violations
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::standard();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
+
+        Size negCount = countNegativeOffDiag(mat, n, 0.0);
+        BOOST_CHECK_MESSAGE(negCount > 0,
+            "StandardCentral at sigma=0.001 should have "
+            "negative off-diagonals, but found " << negCount);
+
+        // With very loose tolerance, all should pass
+        Size negCountLoose = countNegativeOffDiag(mat, n, 1e6);
+        BOOST_CHECK_EQUAL(negCountLoose, Size(0));
+
+        BOOST_TEST_MESSAGE("  StandardCentral: " << negCount
+            << " neg off-diags (strict), "
+            << negCountLoose << " (loose eps=1e6)");
+    }
+
+    // ExponentialFitting should have zero violations
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::exponentialFitting();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
+
+        Size negCount = countNegativeOffDiag(mat, n, 0.0);
+        BOOST_CHECK_EQUAL(negCount, Size(0));
+    }
+
+    // MilevTagliani should also have zero violations
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::milevTaglianiCN();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
+
+        Size negCount = countNegativeOffDiag(mat, n, 0.0);
+        BOOST_CHECK_EQUAL(negCount, Size(0));
+    }
+
+    // Matrix finiteness check
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::exponentialFitting();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
+
+        BOOST_CHECK_MESSAGE(allFinite(mat, n),
+            "ExponentialFitting operator should have all finite entries");
+    }
+}
+
+
+// ===================================================================
+// Operator coefficient verification
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testOperatorCoefficientFormulas) {
+    BOOST_TEST_MESSAGE(
+        "Testing operator tridiagonal coefficients "
+        "match expected formulas for each scheme...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real spot = 100.0;
+    const Rate r = 0.05;
+    const Rate q = 0.02;
+    const Volatility vol = 0.20;
+    const Real strike = 100.0;
+
+    auto process = makeProcess(spot, r, q, vol);
+
+    // Uniform mesh in log-space
+    const Size xGrid = 10;
+    const Real xMin = std::log(50.0);
+    const Real xMax = std::log(200.0);
+    const Real h = (xMax - xMin) / (xGrid - 1);
+
+    auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+
+    const Time dt = 1.0 / 50.0;
+
+    // Expected log-space quantities
+    const Real drift = r - q - vol * vol / 2.0;
+    const Real variance = vol * vol;
+    const Real diffBase = variance / 2.0;
+
+    // --- StandardCentral ---
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::standard();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
+
+        // Check interior node (i=5)
+        const Size i = 5;
+        const Real lower = Real(mat(i, i-1));
+        const Real diag  = Real(mat(i, i));
+        const Real upper = Real(mat(i, i+1));
+
+        // Expected: diffusion = diffBase/h^2, convection = drift/(2h)
+        const Real expectedLower = diffBase / (h*h) - drift / (2.0*h);
+        const Real expectedUpper = diffBase / (h*h) + drift / (2.0*h);
+        const Real expectedDiag = -2.0 * diffBase / (h*h) - r;
+
+        BOOST_CHECK_CLOSE(lower, expectedLower, 0.1);
+        BOOST_CHECK_CLOSE(upper, expectedUpper, 0.1);
+        BOOST_CHECK_CLOSE(diag, expectedDiag, 0.1);
+    }
+
+    // --- ExponentialFitting ---
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::exponentialFitting();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
+
+        const Size i = 5;
+        const Real lower = Real(mat(i, i-1));
+        const Real upper = Real(mat(i, i+1));
+
+        // Peclet number and fitting factor
+        const Real Pe = drift * h / variance;
+        const Real rho = (Pe != 0.0) ? Pe / std::tanh(Pe) : 1.0;
+        const Real aFitted = diffBase * rho;
+
+        const Real expectedLower = aFitted / (h*h) - drift / (2.0*h);
+        const Real expectedUpper = aFitted / (h*h) + drift / (2.0*h);
+
+        BOOST_CHECK_CLOSE(lower, expectedLower, 0.5);
+        BOOST_CHECK_CLOSE(upper, expectedUpper, 0.5);
+
+        BOOST_TEST_MESSAGE("  ExpFit: Pe=" << Pe << ", rho=" << rho
+            << ", aFitted=" << aFitted << ", aBase=" << diffBase);
+    }
+
+    // --- MilevTagliani ---
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::milevTaglianiCN();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
+
+        const Size i = 5;
+        const Real lower = Real(mat(i, i-1));
+        const Real upper = Real(mat(i, i+1));
+
+        const Real aAdd = r * r * h * h / (8.0 * variance);
+        const Real aMT = diffBase + aAdd;
+
+        const Real expectedLower = aMT / (h*h) - drift / (2.0*h);
+        const Real expectedUpper = aMT / (h*h) + drift / (2.0*h);
+
+        BOOST_CHECK_CLOSE(lower, expectedLower, 0.5);
+        BOOST_CHECK_CLOSE(upper, expectedUpper, 0.5);
+
+        BOOST_TEST_MESSAGE("  MT: aAdd=" << aAdd
+            << ", aMT=" << aMT << ", aBase=" << diffBase);
+    }
+}
+
+
+// ===================================================================
+// Backward compatibility: default desc == standard()
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testDefaultDescEqualsStandard) {
+    BOOST_TEST_MESSAGE(
+        "Testing default FdmBlackScholesSpatialDesc matches standard()...");
+
+    auto process = makeProcess(100.0, 0.05, 0.02, 0.20);
+
+    const Size xGrid = 30;
+    const Time maturity = 0.5;
+    const Real strike = 100.0;
+
+    auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(
+            std::log(50.0), std::log(200.0), xGrid));
+
+    const Time dt = maturity / 50.0;
+
+    // Default constructor
+    auto opDefault = ext::make_shared<FdmBlackScholesOp>(
+        mesher, process, strike,
+        false, -Null<Real>(), 0,
+        ext::shared_ptr<FdmQuantoHelper>(),
+        FdmBlackScholesSpatialDesc());
+
+    // Explicit standard()
+    auto opStandard = ext::make_shared<FdmBlackScholesOp>(
+        mesher, process, strike,
+        false, -Null<Real>(), 0,
+        ext::shared_ptr<FdmQuantoHelper>(),
+        FdmBlackScholesSpatialDesc::standard());
+
+    opDefault->setTime(0.0, dt);
+    opStandard->setTime(0.0, dt);
+
+    SparseMatrix matDefault = opDefault->toMatrix();
+    SparseMatrix matStandard = opStandard->toMatrix();
+
+    const Size n = mesher->layout()->size();
+    for (Size i = 0; i < n; ++i) {
+        for (Size j = 0; j < n; ++j) {
+            BOOST_CHECK_EQUAL(Real(matDefault(i,j)),
+                              Real(matStandard(i,j)));
+        }
+    }
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()

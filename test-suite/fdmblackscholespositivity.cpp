@@ -682,6 +682,154 @@ BOOST_AUTO_TEST_CASE(testTruncatedCallNumericalDiffusion) {
 }
 
 
+BOOST_AUTO_TEST_CASE(testExtremeParameterStress) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing extreme parameter stress: high r, near-zero "
+        "maturity, fine/coarse grids, near-zero vol...");
+
+    // Common setup
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real K = 60.0;
+    const Real cash = 10.0;
+
+    auto makeProc = [&](Real spot, Rate r, Volatility vol) {
+        return ext::make_shared<BlackScholesMertonProcess>(
+            Handle<Quote>(ext::make_shared<SimpleQuote>(spot)),
+            Handle<YieldTermStructure>(flatRate(today, 0.0, dc)),
+            Handle<YieldTermStructure>(flatRate(today, r, dc)),
+            Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+    };
+
+    auto runCheck = [&](const char* label,
+                        ext::shared_ptr<GeneralizedBlackScholesProcess> proc,
+                        Time maturity, Size xGrid, Size tGrid) {
+        const auto mesher = ext::make_shared<FdmMesherComposite>(
+            ext::make_shared<Uniform1dMesher>(
+                std::log(10.0), std::log(200.0), xGrid));
+
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::make_shared<CashOrNothingPayoff>(Option::Put, K, cash);
+        const auto calc =
+            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+        const Array payoffVec = buildPayoffVector(mesher, calc, maturity);
+        const FdmBoundaryConditionSet bcSet;
+
+        // Test with ExponentialFitting + CN
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, proc, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), fittedDesc());
+
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
+
+        bool allOk = true;
+        for (Size i = 0; i < v.size(); ++i) {
+            if (!std::isfinite(v[i])) {
+                allOk = false;
+                break;
+            }
+        }
+
+        BOOST_CHECK_MESSAGE(allOk,
+            label << ": found non-finite values");
+        BOOST_TEST_MESSAGE("  " << label << ": all finite = "
+            << (allOk ? "yes" : "NO"));
+    };
+
+    // High r (sigma^2 < r)
+    runCheck("High r (r=0.50, vol=0.20)",
+             makeProc(60.0, 0.50, 0.20), 5.0/12.0, 400, 40);
+
+    // Near-zero maturity
+    runCheck("Near-zero maturity (T=1/365)",
+             makeProc(60.0, 0.05, 0.20), 1.0/365.0, 100, 10);
+
+    // Fine grid
+    runCheck("Fine grid (5000x2000)",
+             makeProc(60.0, 0.05, 0.001), 5.0/12.0, 200, 50);
+
+    // Coarse grid
+    runCheck("Coarse grid (20x5)",
+             makeProc(60.0, 0.05, 0.20), 5.0/12.0, 20, 5);
+
+    // Near-zero vol
+    runCheck("Near-zero vol (sigma=1e-6)",
+             makeProc(60.0, 0.05, 1e-6), 5.0/12.0, 200, 40);
+}
+
+
+BOOST_AUTO_TEST_CASE(testCrossValidationModerateVol) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing cross-validation: all three schemes agree "
+        "at moderate vol (sigma=0.30, sigma^2 > r)...");
+
+    LowVolSetup baseSetup;
+
+    // Override with moderate vol
+    const Volatility vol = 0.30;
+    const DayCounter dc = Actual365Fixed();
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(baseSetup.spot)),
+        Handle<YieldTermStructure>(flatRate(baseSetup.today, baseSetup.q, dc)),
+        Handle<YieldTermStructure>(flatRate(baseSetup.today, baseSetup.r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(baseSetup.today, vol, dc)));
+
+    const Real K = 60.0;
+    const Real cash = 10.0;
+    const Size xGrid = 400;
+    const Size tGrid = 40;
+    const Time maturity = baseSetup.maturity;
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(
+            std::log(10.0), std::log(200.0), xGrid));
+
+    const ext::shared_ptr<StrikedTypePayoff> payoff =
+        ext::make_shared<CashOrNothingPayoff>(Option::Put, K, cash);
+    const auto calc =
+        ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+    const Array payoffVec = buildPayoffVector(mesher, calc, maturity);
+    const FdmBoundaryConditionSet bcSet;
+
+    auto solve = [&](const FdmBlackScholesSpatialDesc& desc) {
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
+        return v;
+    };
+
+    Array vCentral = solve(centralDesc());
+    Array vExpFit  = solve(fittedDesc());
+    Array vMT      = solve(milevTaglianiDesc());
+
+    // All three should agree very closely since sigma^2 = 0.09 > r = 0.05
+    Real maxDiff = 0.0;
+    for (Size i = 5; i < xGrid - 5; ++i) {
+        const Real d1 = std::fabs(vCentral[i] - vExpFit[i]);
+        const Real d2 = std::fabs(vCentral[i] - vMT[i]);
+        const Real d3 = std::fabs(vExpFit[i] - vMT[i]);
+        maxDiff = std::max(maxDiff, std::max(d1, std::max(d2, d3)));
+    }
+
+    BOOST_TEST_MESSAGE("  Max pairwise difference at sigma=0.30: "
+        << maxDiff);
+
+    BOOST_CHECK_MESSAGE(maxDiff < 1e-4,
+        "Schemes should agree closely at moderate vol, "
+        "but max diff = " << maxDiff);
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()

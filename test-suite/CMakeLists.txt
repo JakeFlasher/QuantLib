@@ -1,6 +1,7 @@
 set(QL_TEST_SOURCES
  fdmblackscholespositivity.cpp
  fdmblackscholesspatialdiscretization.cpp
+ fdmhyperboliccottest.cpp
  fdmdiscretebarrier.cpp
  fdmdiscretebarrierengine.cpp
     americanoption.cpp
