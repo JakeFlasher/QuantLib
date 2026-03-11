@@ -1,0 +1,1435 @@
+\documentclass[10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage[version=4]{mhchem}
+\usepackage{stmaryrd}
+\usepackage{graphicx}
+\usepackage[export]{adjustbox}
+\graphicspath{ {./images/} }
+\usepackage{caption}
+\usepackage{bbold}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue, filecolor=magenta, urlcolor=cyan,}
+\urlstyle{same}
+
+\title{NONSTANDARD FINITE DIFFERENCE SCHEMES WITH APPLICATION TO FINANCE: OPTION PRICING }
+
+\author{Mariyan Milev, Aldo Tagliani\\
+Communicated by S. T. Rachev}
+\date{}
+
+
+%New command to display footnote whose markers will always be hidden
+\let\svthefootnote\thefootnote
+\newcommand\blfootnotetext[1]{%
+  \let\thefootnote\relax\footnote{#1}%
+  \addtocounter{footnote}{-1}%
+  \let\thefootnote\svthefootnote%
+}
+
+%Overriding the \footnotetext command to hide the marker if its value is `0`
+\let\svfootnotetext\footnotetext
+\renewcommand\footnotetext[2][?]{%
+  \if\relax#1\relax%
+    \ifnum\value{footnote}=0\blfootnotetext{#2}\else\svfootnotetext{#2}\fi%
+  \else%
+    \if?#1\ifnum\value{footnote}=0\blfootnotetext{#2}\else\svfootnotetext{#2}\fi%
+    \else\svfootnotetext[#1]{#2}\fi%
+  \fi
+}
+
+\begin{document}
+\maketitle
+\captionsetup{singlelinecheck=false}
+
+
+\begin{abstract}
+The paper is devoted to pricing options characterized by discontinuities in the initial conditions of the respective Black-Scholes partial differential equation. Finite difference schemes are examined to highlight how discontinuities can generate numerical drawbacks such as spurious oscillations. We analyze the drawbacks of the Crank-Nicolson scheme that is most frequently used numerical method in Finance because of its second order accuracy. We propose an alternative scheme that is free of spurious oscillations and satisfy the positivity requirement, as it is demanded for the financial solution of the Black-Scholes equation.
+\end{abstract}
+
+\begin{enumerate}
+  \item Introduction. In the market of financial derivatives the most important problem is the so called option valuation problem, i.e. to compute a fair value for the option. The Black-Scholes analytic model for determining the behavior of the stock price turns out to be fundamental in option pricing, [1].
+\end{enumerate}
+
+\footnotetext{2010 Mathematics Subject Classification: 65M06, 65M12.\\
+Key words: Black-Scholes equation, finite difference schemes, Jacobi matrix; M-matrix, nonsmooth initial conditions, positivity-preserving.
+}In absence of a valuation formula for non-standard options (see [3]), the finite difference approach is a powerful tool for pricing. Usually the choice goes toward numerical methods with high order of accuracy (e.g. Crank-Nicolson scheme), and no attention is paid to how the financial provision of the contract can affect the reliability of the numerical solution, see Smith in [6], Tavella and Randall in [8], or Zvan et al. in [11]. Indeed these schemes are applied without considering the well-known problems that can arise in presence of discontinuities which deteriorate the numerical approximation.
+
+In order to make our analysis concrete, we concentrate the attention on a double barrier knock-out call option with a discrete monitoring clause, but the presented analysis can be easily extended to many other exotic contracts (digital, supershare, binary and truncated payoff options, callable bonds and so on). Such option has a payoff condition equal to $\max (S-K, 0)$ but the option expires worthless if before the maturity the asset price has fallen outside the corridor $[L, U]$ at the prefixed monitoring dates.
+
+In the intermediate periods the Black Scholes equation is applied over the real positive domain. The discontinuity in the initial conditions will be renewed at every monitoring date and often the Crank-Nicolson numerical solution is affected by spurious oscillations that do not decay quickly, Tagliani et al. in [7]. The oscillations derive from an inaccurate approximation of the very sharp gradient produced by the knock-out clause, generating an error that is damped out very slowly.
+
+In Section 2 we discuss the model for discrete double barrier knock-out call options and particularly the main drawbacks like undesired spurious oscillations, arising from centered difference discretization of the Black-Scholes PDE.
+
+In Section 3 we propose a suitable finite difference scheme that enables us to solve accurately the examined PDE. An important factor for numerical schemes is the condition of positivity of the solution that must be satisfied as a consequence of the financial meaning of the involved PDE. We will demonstrate:
+
+\begin{enumerate}
+  \item how an accurate scheme is not necessarily the best, as it could require prohibitively small time steps;
+  \item how a less accurate scheme could work successfully and preserve all financial requirements of the option contract such as positivity.
+\end{enumerate}
+
+In Section 4 we explore examples of discrete double barrier knock-out options that are most frequently used in literature such as Wade et al. in [9], Zvan et al. in [11]. In the conclusion, we have pointed out the advantages of\\
+the proposed nonstandard finite difference scheme for the Black-Scholes partial differential equation.\\
+2. Mathematical model. The Black-Scholes PDE. We consider as a model for the movement of the asset price under the risk-neutral measure a standard geometric Brownian motion diffusion process with constant coefficients $r$ and $\sigma$ :
+
+
+\begin{equation*}
+d S / S=r d t+\sigma d W_{t} \tag{1}
+\end{equation*}
+
+
+The contract to be priced is a discretely monitored double barrier knock-out call option. If $t$ is the time to expiry $T$ of the contract, $0 \leq t \leq T$, the price $V(S, t)$ of the option satisfies the Black-Scholes partial differential equation
+
+
+\begin{equation*}
+-\frac{\partial V}{\partial t}+r S \frac{\partial V}{\partial S}+\frac{1}{2} \sigma^{2} S^{2} \frac{\partial^{2} V}{\partial S^{2}}-r V=0 \tag{2}
+\end{equation*}
+
+
+endowed with initial and boundary conditions:
+
+
+\begin{align*}
+& V(S, 0)=\max (S-K, 0) 1_{[L, U]}(S)  \tag{3}\\
+& V(S, t) \rightarrow 0 \text { as } S \rightarrow 0 \text { or } S \rightarrow \infty \tag{4}
+\end{align*}
+
+
+with updating of the initial condition at the monitoring dates $t_{i}, i=1, \ldots, F$ :
+
+
+\begin{equation*}
+V\left(S, t_{i}\right)=V\left(S, t_{i}^{-}\right) 1_{[L, U]}(S), \quad 0=t_{0}<t_{1}<\ldots<t_{F}=T \tag{5}
+\end{equation*}
+
+
+where $\mathbf{1}_{[L, U]}(x)$ is the indicator function, i.e.,
+
+$$
+\mathbf{1}_{[L, U]}=\left\{\begin{array}{lll}
+1 & \text { if } & S \in[L, U] \\
+0 & \text { if } & S \notin[L, U]
+\end{array}\right.
+$$
+
+The knock-out clause at the monitoring date introduces a discontinuity at the barriers (set at $L=90, U=110$ ), as it is illustrated in Fig. 1. We notice the presence of undesired spurious oscillations near the barriers (set at $L=90$ and $U=110$ respectively) and near the strike ( $K=100$ ), where the Delta $=\frac{\partial V}{\partial S}$ is discontinuous at $t=0$.
+
+These spikes which remain well localized, don't reflect instability but rather that the discontinuities that are periodically produced by the barriers at monitoring dates. The spikes can not decay fast enough in the Crank-Nicolson solution. In [4] Milev and Tagliani show that mathematically, such spurious oscillations stem from the combined effect of two factors, as
+
+\begin{figure}[h]
+\begin{center}
+  \includegraphics[alt={},max width=\textwidth]{2836c898-f95d-4d45-943f-f7d6437941ae-04_822_1072_419_317}
+\captionsetup{labelformat=empty}
+\caption{Fig. 1. Option pricing $V(S, t)$ of a discrete double barrier knock-out call option just before the last monitoring date $t_{F}=12$. The Crank-Nicolson scheme is applied for steps, respectively $\Delta S=0.01$ and $\Delta t=0.001$, and parameters $\sigma=0.2, r=0.05$,
+$$
+T=0.5, K=100, L=90, U=110
+$$}
+\end{center}
+\end{figure}
+
+\begin{enumerate}
+  \item positivity of the solution $V(S, t)$ not preserved;
+  \item presence of negative/complex eigenvalues in the spectrum of the corresponding matrix originating from the finite difference equation.
+\end{enumerate}
+
+Then special finite difference schemes will be investigated where
+
+\begin{enumerate}
+  \item the solution is positive;
+  \item the spectrum contains only positive eigenvalues.
+  \item Finite difference approach. As usual, in the finite difference approximation the $S$-domain is truncated at the value $S_{\text {max }}$, sufficiently large such that computed values are not appreciably affected by the upper boundary. The computational domain $\left[0, S_{\max }\right] \times[0, T]$ is discretized by a uniform mesh with steps\\
+$\Delta S, \Delta t$. Therefore we obtain the nodes $S_{j}$ and $t_{n}$, where ( $S_{j}=j \Delta S, t_{n}=n \Delta t$ ), $j=0, \ldots, M, n=0, \ldots, X$ so that $S_{\max }=M \Delta S, T=X \Delta t, X$ and $M$ integer numbers.
+  \item The choice of a specific numerical scheme is based on its property of convergence. The requirement rests on the Lax equivalence theorem.
+  \item The parabolic nature of the Black-Scholes equation ensures that being the initial condition $V(S, 0)=(S-K)^{+} 1_{[L, U]}(S)$ square-integrable the solution is smooth in the sense that $V(\cdot, t) \in C^{\infty}\left(\mathbb{R}^{+}\right), \forall t \in\left(t_{i-1}, t_{i}^{-}\right], i=1, \ldots, F$. Thus rough initial data give rise to smooth solutions in infinitesimal time.
+\end{enumerate}
+
+In some cases, as a consequence the solution obeys the maximum principle:
+
+
+\begin{equation*}
+\max _{S \in\left[0, S_{\max }\right]}\left|V\left(S, t_{1}\right)\right| \geq \max _{S \in\left[0, S_{\max }\right]}\left|V\left(S, t_{2}\right)\right|, \quad t_{1} \leq t_{2} \tag{6}
+\end{equation*}
+
+
+This inequality means that the maximum value of $V(S, t)$ should not increase as $t$ increases. If that condition is violated then the numerical solution may exhibit spurious wiggles near sharp gradients. As a consequence, even though the numerical method converges, it often yields approximate solutions that differ qualitatively from corresponding exact solutions.\\
+3.1. Analysis of the Crank-Nicolson scheme. The Crank-Nicolson scheme provides the difference equation
+
+$$
+P V^{n+1}=N V^{n}
+$$
+
+with $P$ and $N$ the following tridiagonal matrices
+
+$$
+\begin{aligned}
+P & =\operatorname{tridiag}\left\{\frac{r}{4} \frac{S_{j}}{\Delta S}-\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2} ; \frac{1}{\Delta t}+\frac{1}{2}\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}+\frac{r}{2} ;-\frac{r}{4} \frac{S_{j}}{\Delta S}-\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2}\right\} \\
+N & =\operatorname{tridiag}\left\{-\frac{r}{4} \frac{S_{j}}{\Delta S}+\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2} ; \frac{1}{\Delta t}-\frac{1}{2}\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}-\frac{r}{2} ; \frac{r}{4} \frac{S_{j}}{\Delta S}+\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2}\right\}
+\end{aligned}
+$$
+
+a) The case $\sigma^{2}>r$
+
+Theorem 3.1. Under the given hypothesis, the following hold:
+
+\begin{enumerate}
+  \item If $\sigma^{2}>r$, then $P^{-1}>0$, with $\left\|P^{-1}\right\|_{\infty} \leq \frac{1}{\frac{1}{\Delta t}+\frac{r}{2}}$
+  \item If $\sigma^{2}>r$ and $\Delta t<\frac{2}{r+(\sigma M)^{2}}$, then\\
+i) $N \geq 0$ with $\|N\|_{\infty}=\frac{1}{\Delta t}-\frac{r}{2}>0$;\\
+ii) both positivity and discrete maximum principle are satisfied;
+  \item If $\sigma^{2}>r$ and $\Delta t<\frac{2}{r+2(\sigma M)^{2}}$, then $\lambda_{i}\left(P^{-1} N\right) \in(0,1)$ are distinct.
+\end{enumerate}
+
+Proof. 1) $P$ is an irreducible row diagonally dominant matrix. Then $P$ is an M-matrix and thus $P^{-1}>0$ with $\left\|P^{-1}\right\|_{\infty} \leq \frac{1}{\frac{1}{\Delta t}+\frac{r}{2}}$, see Windisch in [10].
+
+We will state the main result of Windisch (1989). Let $P=\left[p_{i j}\right]$ and $r_{i}=\left|p_{i i}\right|-\sum_{j \neq i}\left|p_{i j}\right|>0 \forall i$ then the bound $\left\|P^{-1}\right\|_{\infty} \leq \max _{i} \frac{1}{r_{i}}$ is strict. If $\Delta t \rightarrow 0$ then $P$ is strongly row diagonally dominant and equality holds.\\
+2) The matrix $N$ has positive entries with $\|N\|_{\infty}=\frac{1}{\Delta t}-\frac{r}{2}>0$. Then $V^{n+1}=P^{-1} N V^{n}>0$ and the numerical solution is positive.
+
+$$
+\left\|V_{n+1}\right\|_{\infty}=\left\|P^{-1} N V_{n}\right\|_{\infty}=\left\|P^{-1}\right\|_{\infty}\|N\|_{\infty}\left\|V_{n}\right\|_{\infty} \leq \frac{\frac{1}{\Delta t}-\frac{r}{2}}{\frac{1}{\Delta t}+\frac{r}{2}}\left\|V_{n}\right\|_{\infty} \leq\left\|V_{n}\right\|_{\infty}
+$$
+
+so that the scheme satisfies the discrete maximum principle.\\
+3) $P$ and $N$ may be written as $P=\frac{1}{\Delta t} I+C$ and $N=\frac{1}{\Delta t} I-C$, where
+
+$$
+C=\operatorname{tridiag}\left\{\frac{r}{4} \frac{S_{j}}{\Delta S}-\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2} ; \frac{1}{2}\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}+\frac{r}{2} ;-\frac{r}{4} \frac{S_{j}}{\Delta S}-\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2}\right\}
+$$
+
+Then the matrix $C$ admits $M$ distinct real eigenvalues $\lambda_{i}(C) \in\left[\frac{r}{2} ; \frac{r}{2}+(\sigma M)^{2}\right]$, being similar to a Jacobi matrix ${ }^{1}$, and $\lambda_{i}\left(P^{-1} N\right)=\frac{1-\Delta t \lambda_{i}(C)}{1+\Delta t \lambda_{i}(C)}$. And from the condition $\Delta t<\frac{2}{r+2(\sigma M)^{2}}$ it follows $\lambda_{i}\left(P^{-1} N\right) \in(0,1)$.
+
+\footnotetext{${ }^{1}$ The term Jacobi matrix unfortunately has more than one meaning in the literature. Here, we mean a tridiagonal real square matrix $A=\operatorname{tridiag}\left\{c_{i}, a_{i}, b_{i}\right\}$ of order $n$ with off-diagonal elements that have the same sign, i.e. $c_{i} b_{i-1}>0$, for $i=2,3, \ldots, n$. For every Jacobi matrix $A$ there exists a nonsingular diagonal matrix $D=\operatorname{diag}\left(d_{1}, \ldots, d_{n}\right)$ such that $D A D^{-1}$ is a Jacobi symmetric matrix. All eigenvalues of a Jacobi matrix are real and distinct, [5].
+}If the discretization scheme does not preserve the above properties, i.e. the financial condition $\sigma^{2}>r$ and the $\Delta t$ restrictions, then the solution may take negative values and oscillate. Let us explore the case $\sigma^{2}<r$.
+
+Indeed, for a fixed $\Delta t$, when $M \rightarrow \infty$ (equivalently, $\Delta S \rightarrow 0$ ) we have that the matrix $N$ could have negative elements, and then the numerical solution $V^{n+1}$ could take negative values. This follows from the finite difference equation $V^{n+1}=\left(P^{-1} N\right)^{n} V^{0}$, where $V^{0}$ is a vector representing the initial condition (3) in the the Black-Scholes equation. (In fact $V^{0}$ is the payoff for the original problem at $T$ ). Such is the case illustrated on Fig. 1 where $\sigma^{2}<r$ and the Crank-Nicolson numerical solutions takes negatives values for values of the underlying asset close to the barriers $L=90$ and $U=110$.
+
+Now, we will prove that if $\sigma^{2}<r$, then the numerical solution could oscillate. Let us denote the spectrum of eigenvalues of the matrix $C$ with $\rho(C):= \max \left(\lambda_{i}(C)\right)$. Diminishing the space step $\Delta S$, i.e. $M \rightarrow \infty$, having in mind that $\lambda_{i}(C) \in\left[\frac{r}{2} ; \frac{r}{2}+(\sigma M)^{2}\right]$, then the spectrum $\rho(C) \rightarrow \infty$ and $\lambda_{i}\left(P^{-1} N\right)= \frac{1-\Delta t \lambda_{i}(C)}{1+\Delta t \lambda_{i}(C)} \rightarrow-1$. We will demonstrate that if $\lambda_{i}\left(P^{-1} N\right) \rightarrow-1$ then the Crank-Nicolson numerical solution $V^{n+1}$ may oscillate.
+
+Further, to the $M$ distinct eigenvalues $\lambda_{i}\left(P^{-1} N\right)$ are associated $M$ linearly independent eigenvectors $v_{i}$. Such eigenvectors can be used as a basis for the $M$ dimensional space of the initial condition $V^{0}=\sum_{j=1}^{M} c_{j} v_{j}$, where $c_{j}$ are appropriate weights. Then
+
+$$
+V^{n+1}=\left(P^{-1} N\right)^{n} V^{0}=\left(P^{-1} N\right)^{n} \sum c_{j} v_{j}=\sum c_{j}\left(P^{-1} N\right)^{n} v_{j}=\sum c_{j} \lambda_{j}^{n} v_{j}
+$$
+
+From $\lambda_{j} \rightarrow-1$ then $V^{n+1}$ oscillates. The Crank-Nicolson solution is affected by spurious oscillations that do not decay quickly as it is shown in Fig. 1. The scheme is applied to the Black-Scholes equation (2) that has discontinuous initial conditions (3)-(5) in case of a discrete double barrier knock-out call option with parameters $\sigma=0.2$ and $r=0.05$, i.e. the case $\sigma^{2}<r$.\\
+b) For the case $\sigma^{2}<r$, in [4] Milev and Tagliani have proposed a variant of the Crank-Nicolson scheme that works successfully, i.e. the numerical solution is positive and does not suffer from spurious oscillations.\\
+3.2. Efficient nonstandard semi-implicit scheme. In this section we introduce a less accurate scheme, i.e. $O\left(\Delta S^{2}, \Delta t\right)$, which allows us to choose a more acceptable $\Delta t$ time step. In the meantime, the scheme prevents spurious oscillations and guarantees a positive solution.
+
+First of all, we discretize the reaction term $-r V$ in equation (2) through a bivariate approximation which involves the values of $V_{j}^{n+1}, V_{j-1}^{n}$ and $V_{j+1}^{n}$.
+
+By the standard procedure we have
+
+$$
+V(S, t)=b\left(V_{j-1}^{n}+V_{j+1}^{n}\right)+(1-2 b) V_{j}^{n+1}
+$$
+
+with discretization error $O\left(\Delta S^{2}, \Delta t\right)$ and $b$ an arbitrary constant to be fixed below. The term $\frac{\partial V}{\partial S}$ is discretized through an explicit centered difference, while $\frac{\partial^{2} V}{\partial S^{2}}$ through an implicit scheme, in order to split the contribution of $\frac{\partial V}{\partial S}$ and $\frac{\partial^{2} V}{\partial S^{2}}$ in two different matrices. The stencil of the scheme nodes is shown on Fig. 2. The scheme is then obtained in a semi-implicit form.
+
+\begin{figure}[h]
+\begin{center}
+  \includegraphics[alt={},max width=\textwidth]{2836c898-f95d-4d45-943f-f7d6437941ae-08_261_1095_1040_325}
+\captionsetup{labelformat=empty}
+\caption{Fig. 2. Involved nodes in the semi-implicit scheme}
+\end{center}
+\end{figure}
+
+The corresponding finite difference equation is $P V^{n+1}=N V^{n}$, with
+
+$$
+\begin{aligned}
+P & =\operatorname{tridiag}\left\{-\frac{\Delta t}{2}\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2} ; 1+\Delta t\left[\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}+r(1-2 b)\right] ;-\frac{\Delta t}{2}\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}\right\} \\
+N & =\operatorname{tridiag}\left\{\Delta t \frac{r}{2}\left(-\frac{S_{j}}{\Delta S}-2 b\right) ; 1 ; \Delta t \frac{r}{2}\left(\frac{S_{j}}{\Delta S}-2 b\right)\right\}
+\end{aligned}
+$$
+
+By choosing $b=-\frac{1}{2} M$ then
+
+\begin{itemize}
+  \item $N$ has non-negative entries, with $\|N\|_{\infty}=1+r \Delta t M$;
+  \item $P$ is symmetric row diagonally dominant. From Gerschgorin theorem follows $\lambda_{i}(P)>0$. Thus, $P$ is positive definite, so that $P^{-1}$ exists.\\
+$P$ is an irreducible diagonally dominant matrix and then $P$ is an M-matrix, so that $P^{-1}>0$. In addition $\left\|P^{-1}\right\|_{\infty} \leq \frac{1}{1+r \Delta t(M+1)}$, (Windisch, [10]).
+  \item By combining $N \geq 0$ and $P^{-1}>0$, then the solution $V^{n+1}=P^{-1} N V^{n}$ is positive since $V^{0} \geq 0$.
+  \item For the spectral radius $\rho\left(P^{-1} N\right)$ of the iteration matrix $P^{-1} N$, we have
+\end{itemize}
+
+$$
+\rho\left(P^{-1} N\right) \leq\left\|P^{-1} N\right\|_{\infty} \leq\left\|P^{-1}\right\|_{\infty}\|N\|_{\infty} \leq \frac{1+r \Delta t M}{1+r \Delta t(M+1)}<1, \quad \forall \Delta t
+$$
+
+Equivalently,
+
+\begin{itemize}
+  \item the scheme is unconditionally stable and via Lax-equivalence theorem,
+  \item convergent being consistent with a local truncation error $O\left(\Delta S^{2}, \Delta t\right)$.
+\end{itemize}
+
+Moreover, we have
+
+$$
+\left\|V^{n+1}\right\|_{\infty}=\left\|P^{-1} N V^{n}\right\|_{\infty} \leq \frac{1+r \Delta t M}{1+r \Delta t(M+1)}\left\|V^{n}\right\|_{\infty}<\left\|V^{n}\right\|_{\infty}
+$$
+
+Then the numerical solution satisfies unconditionally the discrete version of the maximum principle and the scheme is unconditionally monotone.
+
+For the eigenvalues of the iteration matrix $P^{-1} N$, the following result holds:\\
+Theorem 3.2. Under the condition $\Delta t<\frac{1}{r M}$, then $P^{-1} N$ admits $M$ real positive and distinct eigenvalues $\lambda_{i}\left(P^{-1} N\right) \in(0,1)$.
+
+Proof. The matrix $N$ is diagonally dominant if $1>-\Delta t \frac{r}{2} 4 b$, where $b=-\frac{1}{M}$ or, equivalently, $\Delta t<\frac{1}{r M}$. Then $N$ is similar to a symmetric positive definite matrix $N^{\text {spd }}$, (Windisch, [10], with $N=D^{-1} N^{\text {spd }} D$ and $D$ a diagonal matrix, whose entries are obtained by the off-diagonal entries of $N$.
+
+From $P^{-1} N u=\lambda u \Rightarrow D P^{-1} D^{-1} N^{\text {spd }} D u=\lambda D u$. Putting $u_{1}=D u$, it follows that $N^{s p d} u_{1}=\lambda\left(D P D^{-1}\right) u_{1}$ and
+
+$$
+\lambda=\frac{u_{1}^{H} N^{s p d} u_{1}}{u_{1}^{H}\left(D P D^{-1}\right) u_{1}}
+$$
+
+where $H$ denotes conjugate transpose.\\
+From $u_{1}^{H} N^{s p d} u_{1}>0, u_{1}^{H}\left(D P D^{-1}\right) u_{1}>0$, being $D P D^{-1}$ similar to $P$, then $\lambda$ is real and positive. From which $\lambda_{i}\left(P^{-1} N\right)>0, \forall i$ holds.
+
+The eigenvalue problem $P^{-1} N u=\lambda u$ admits $M$ eigenvalues. Now we prove such eigenvalues are distinct. We have that $N-\lambda P$ is a tridiagonal matrix, i.e:
+
+$$
+N-\lambda P=\operatorname{tridiag}\left\{b_{i}, a_{i}, c_{i}\right\}
+$$
+
+with $b_{i}, c_{i}>0, \forall i$. If $D=\operatorname{diag}\left\{1, \frac{b_{1}}{c_{1}}, \frac{b_{1} b_{2}}{c_{1} c_{2}}, \ldots, \frac{b_{1} \ldots b_{M-1}}{c_{1} \ldots c_{M-1}}\right\}$ then
+
+$$
+N-\lambda P=D^{-1} \operatorname{tridiag}\left\{\gamma_{i}, a_{i}, \gamma_{i}\right\} D
+$$
+
+with $\gamma_{i}=\sqrt{b_{i} c_{i}}, i=1, \ldots, M-1$, (see Ortega, p. 113, [5]).\\
+The matrix $J=\operatorname{tridiag}\left\{\gamma_{i}, a_{i}, \gamma_{i}\right\}$ is a Jacobi matrix which admits $M$ distinct eigenvalues $\lambda_{1}^{(J)}(\lambda), \ldots, \lambda_{M}^{(J)}(\lambda)$. Then $J$ may be diagonalized so that
+
+$$
+J=S^{-1} \operatorname{diag}\left\{\lambda_{1}^{(J)}(\lambda), \ldots, \lambda_{M}^{(J)}(\lambda)\right\} S
+$$
+
+where $S$ is the eigenvectors matrix. Then
+
+$$
+0=\operatorname{det}(N-\lambda P)=\operatorname{det} D^{-1} S^{-1} \operatorname{diag}\left\{\lambda_{1}^{(J)}(\lambda), \ldots, \lambda_{M}^{(J)}(\lambda)\right\} S D=\prod_{j=1}^{M} \lambda_{j}^{(J)}(\lambda)
+$$
+
+leads to a set of $M$ equations
+
+$$
+\lambda_{j}^{(J)}(\lambda)=0, \quad j=1, \ldots, M
+$$
+
+The set of equations admits $M$ distinct solutions $\lambda_{1}, \ldots, \lambda_{M}$, being $\lambda_{j}^{(J)}(\lambda)$ distinct. So $\lambda_{1}, \ldots, \lambda_{M}$ are the distinct eigenvalues of $P^{-1} N$.
+
+The solution accuracy is defined by analyzing the error component introduced by the bivariate approximation of the reaction term $-r V$. By Taylor expansion about the time level $n \Delta t$ we have
+
+$$
+(1-2 b) V_{j}^{n+1}+b\left(V_{j-1}^{n}+V_{j+1}^{n}\right)=V_{j}^{n}+\Delta t(1+M) \frac{\partial V}{\partial t}+O\left(\Delta S^{2}\right)+O\left(\Delta t^{2}\right)
+$$
+
+Then the scheme is consistent with equation (2) with a local truncation error $O(\Delta t)+O\left(\Delta S^{2}\right)$.
+
+When $M$ assumes large values the error term $r \Delta t(1+M)$ becomes influent and under the only constraint $\Delta t<\frac{1}{r M}$ of Theorem 3.2 the scheme provides a poor solution. Then an accurate solution requires
+
+
+\begin{equation*}
+\Delta t \ll \frac{1}{r(1+M)} \tag{7}
+\end{equation*}
+
+
+Then, under (7), the proposed scheme guarantees an accurate solution being positivity-preserving and free of spurious oscillations.\\[0pt]
+4. Numerical results. We will present numerical results for some of the most explored examples in literature for discrete barrier knock-out options that are discretely monitored, see Wade et al. in [9] and Zvan et al. in [11].
+
+Example 4.1. Let us price a discrete double barrier knock-out call option having a discontinuous payoff defined by conditions (3)-(5) and for which the strike price is 100 , the volatility is $25 \%$ per annum, the option has six months remaining to maturity, the risk-free rate is $5 \%$ per annum (compounded continuously), the two barriers are placed, respectively at 95 and at 110 .
+
+The numerical results and parameters are presented in Table 1 and Fig. 3.
+
+\begin{table}[h]
+\begin{center}
+\begin{tabular}{|l|l|l|l|l|l|}
+\hline
+Values of underlying asset $S_{0}$ & Standard implicit scheme & CrankNicolson scheme & Duffy implicit scheme & Semiimplicit scheme & Monte Carlo method (standard error) $10^{8}$ - asset paths \\
+\hline
+95 & 0.17564 & 0.17561 & 0.17315 & 0.17398 & 0.17359 (0.00054) \\
+\hline
+95.0001 & 0.17904 & 0.17963 & 0.17395 & 0.17412 & 0.17486 (0.00064) \\
+\hline
+95.5 & 0.18322 & 0.18324 & 0.18109 & 0.18152 & 0.18291 (0.00066) \\
+\hline
+99.5 & 0.22818 & 0.22813 & 0.22819 & 0.22902 & 0.22923 (0.00073) \\
+\hline
+100 & 0.23123 & 0.23122 & 0.23137 & 0.23171 & 0.23263 (0.00036) \\
+\hline
+100.5 & 0.23359 & 0.23361 & 0.23386 & 0.23246 & 0.23410 (0.00073) \\
+\hline
+109.5 & 0.17582 & 0.17583 & 0.17323 & 0.17326 & 0.17426 (0.00063) \\
+\hline
+109.9999 & 0.16982 & 0.16989 & 0.16656 & 0.16719 & 0.16732 (0.00062) \\
+\hline
+110 & 0.16906 & 0.16912 & 0.16616 & 0.16703 & 0.16712 (0.00042) \\
+\hline
+\end{tabular}
+\captionsetup{labelformat=empty}
+\caption{Table 1. Prices of a discrete double knock-out call option monitored 5 times. The price of the underlying asset is $S_{0}, K=100, \sigma=0.25, T=0.5, r=0.05$, $L=95, U=110$. The Crank-Nicolson, fully implicit and Duffy scheme are applied with $\Delta S=0.05, \Delta t=0.00001$, while the semi-implicit scheme for $\Delta S=0.05, \Delta t=0.001, S_{\text {max }}=200$}
+\end{center}
+\end{table}
+
+We have applied the Crank-Nicolson scheme and the proposed semi-implicit scheme, presented, respectively in Sections 3.1 and 3.2. The results are compared with those obtained by other standard numerical methods in Finance such as standard fully implicit scheme, the Crank-Nicolson method, the exponentially fitted finite difference scheme of Duffy in [2], and finally to the Monte Carlo simulations. The results in Table 1 and Fig. 3 show that the proposed semiimplicit scheme gives results that are in very good agreement with the Monte Carlo method which could be taken as a bench mark.
+
+The computational results are as expected, because the full implicit scheme and the Duffy implicit schemes are first order accurate, i.e. $O(\Delta S, \Delta t)$.
+
+\begin{figure}[h]
+\begin{center}
+  \includegraphics[alt={},max width=\textwidth]{2836c898-f95d-4d45-943f-f7d6437941ae-12_878_1076_363_315}
+\captionsetup{labelformat=empty}
+\caption{Fig. 3. A comparison of different implicit and semi-implicit finite difference schemes applied to the Black-Scholes equation in case of a discrete double barrier knock-out call option monitored 5 times, $K=100, \sigma=0.25, T=0.5, r=0.05, L=95, U=110$}
+\end{center}
+\end{figure}
+
+Although the Crank-Nicolson scheme is second order accurate both in time and space, i.e. $O\left(\Delta S^{2}, \Delta t^{2}\right)$, in order to be used, the scheme should be applied with a prohibitively small time step, as it is showed in Section 3.1.
+
+We can note the following advantages of the proposed semi-implicit scheme over the other applied finite difference schemes in Table 1:
+
+\begin{itemize}
+  \item The proposed semi-implicit scheme is second order accurate in space, i.e. $O\left(\Delta S^{2}, \Delta t\right)$, and it is more accurate than standard first order accurate schemes in case the schemes are applied for a fixed time step.
+  \item The semi-implicit scheme is positivity-preserving and free of oscillations.
+  \item Moreover, to preserve these properties, it is sufficient to be applied for $\Delta t<\frac{1}{r M}$ that is much bigger than the prohibitively small time step restriction $\Delta t<\frac{2}{r+2(\sigma M)^{2}}$ for the Crank Nicolson scheme, i.e. $M$-times smaller, as we have proved, respectively in Theorem 3.2 and Theorem 3.1.
+  \item The semi-implicit scheme works successfully both for $\sigma^{2}<r$ and $\sigma^{2}>r$.
+  \item The semi-implicit scheme is as fast as the other first order accurate schemes, but it is much faster than the Crank-Nicolson scheme.
+  \item We can note that the close distance of each of the barriers to the strike price is not an obstacle for the presented semi-implicit scheme for obtaining a smooth numerical solution. This is one of the frequently met practical problems applying finite difference schemes in Finance because usually oscillations derive from an inaccurate approximation of the very sharp gradient produced by the knock-out clause, generating an error that is damped out very slowly, (Tagliani et al., [7]), (Wade et al., [9].).
+\end{itemize}
+
+Thus, the semi-implicit scheme turns out to be very efficient because it gives both highly accurate results, satisfies all financial requirements of the option contract and differs with a quick computational time.\\
+5. Discussion and conclusions. We have presented an alternative scheme to the Crank-Nicolson one that do not suffer from spurious oscillations originating from discontinuous boundary conditions. The proposed semi-implicit scheme has lower accuracy, i.e. $O\left(\Delta S^{2}, \Delta t\right)$, but requires less restrictive conditions on the time step.
+
+We have used a non-standard discretization technique of the reaction term. The scheme is conditionally stable but nevertheless it gives highly accurate results and guarantees the absence of spurious oscillations close to discontinuities due to the fact that the scheme has an iteration matrix characterized by real and positive spectrum which allows a fast damping of errors of any order. Moreover, in contrast to most frequently used schemes in computational Finance such as the Crank-Nicolson method, the successful application of the proposed scheme is independent of the financial parameters such as volatility and interest rate, i.e. it is unaffected for low values of the volatility.
+
+\section*{REFERENCES}
+[1] F. Black, M. Scholes. The pricing of options and corporate liabilities. Journal of Political Economy 81 (1973), 637-659.\\[0pt]
+[2] D. J. Duffy. A Critique of the Crank-Nicolson Scheme, Strengths and Weakness for Financial Instrument Pricing. Wilmott Magazine 4 (2004), 68-76.
+
+\section*{A Critique of the Crank \\
+ Nicolson Scheme Strengths \\
+ and Weaknesses for Financial Instrument Pricing }
+
+
+\section*{Summary}
+In this article we apply the Finite Difference Method (FDM) to the Black Scholes equation. In particular, we analyse the famous Crank Nicolson method that is very popular in financial engineering. Unfortunately, the method does not always produce accurate results and it is the objective of this article to enumerate the problems and then to propose more robust finite difference schemes. More detailed accounts of the current problem can be found in Duffy 2001 and Duffy 2004.
+
+\section*{1 A short History of Crank Nicolson in Financial Engineering}
+The Crank Nicolson finite difference scheme was invented by John Crank and Phyllis Nicolson. They originally applied it to the heat equation and they approximated the solution of the heat equation on some finite grid by approximating the derivatives in space x and time t by finite differences. Much earlier, Richardson devised a finite difference scheme that was easy to compute but was numerically unstable and thus useless. The instability was not recognized until Crank, Nicolson and others carried out lengthy numerical calculations. In short, the Crank Nicolson method is numerically stable and it only requires the\\
+solution of a very simple system of linear equations (namely, a tridiagonal system) at every time level.
+
+The Crank Nicolson method has become one of the most popular finite difference schemes for approximating the solution of the Black Scholes equation and its generalisations (see for example, Tavella 2000, Bhansali 1998). The method is essentially a second-order approximation to the time derivative that appears in the Black Scholes equation and this property, plus the fact that the method is stable and is easy to program makes it very appealing in practical applications. Numerous articles and publications in the financial engineering literature use Crank Nicolson as the de-facto scheme for time discretisation. Unfortunately, the method breaks down in certain situations and there are better and more robust alternatives that have been documented in the numerical analysis and computational fluid dynamics literature. To this end, we wish to discuss the shortcomings of the method and how they can be resolved.
+
+\section*{2 What is Crank Nicolson, really?}
+The one-factor Black Scholes equation for a derivative quantity $V$ depending on an underlying $S$ is given by
+
+
+\begin{equation*}
+-\frac{\partial V}{\partial t}+\frac{1}{2} \sigma^{2} S^{2} \frac{\partial^{2} V}{\partial S^{2}}+r S \frac{\partial V}{\partial S}-r V=0 \tag{1}
+\end{equation*}
+
+
+In general, this equation must be augmented by other boundary and initial conditions in order to ensure a unique solution. In some cases it may be possible to come up with an exact solution to this problem but in the most general cases we must resort to some kind of approximate method. In this article we discuss the Finite Difference Method and it is based on the tactic of replacing the continuous derivatives in (1) by divided differences defined on a discrete mesh (see Richtmyer 1967).
+
+In order to motivate the Crank Nicolson scheme let us first consider the following fully implicit scheme that we define by replacing derivatives with respect to $S$ by three-point divided differences and the derivative with respect to $t$ by one-sided differences. The scheme is given by
+
+
+\begin{align*}
+& -\frac{V_{j}^{n+1}-V_{j}^{n}}{k}+r j \Delta S\left(\frac{V_{j+1}^{n+1}-V_{j-1}^{n+1}}{2 \Delta S}\right) \\
+& +\frac{1}{2} \sigma^{2} j^{2} \Delta S^{2}\left(\frac{V_{j+1}^{n+1}-2 V_{j}^{n+1}+V_{j-1}^{n+1}}{\Delta S^{2}}\right)  \tag{2}\\
+& =r V_{j}^{n+1}
+\end{align*}
+
+
+In general, the values of $V$ at time level $n$ are known and the values at time level $n+1$ need to be calculated. Rewriting ( 2 ) gives the new form
+
+\[
+\left\{\begin{array}{l}
+a_{j}^{n+1} V_{j-1}^{n+1}+b_{j}^{n+1} V_{j}^{n+1}+c_{j}^{n+1} V_{j+1}^{n+1}=F_{j}^{n+1}  \tag{3}\\
+\text { where } \\
+a_{j}^{n+1}=\left(\frac{1}{2} \sigma^{2} j^{2} k-\frac{k r j}{2}\right) \\
+b_{j}^{n+1}=-\left(1+\sigma^{2} j^{2} k+r\right) \\
+c_{j}^{n+1}=\left(\frac{1}{2} \sigma^{2} j^{2} k+\frac{k r j}{2}\right) \\
+F_{j}^{n+1}=-V_{j}^{n}
+\end{array}\right.
+\]
+
+This is a tridiagonal scheme that we solve at each time level using standard matrix solvers, for example LU decomposition (see Isaacson 1966, Duffy 2004). The fully implicit scheme has a number of desirable features. First, it is stable and there is no restriction on the relative sizes of the time mesh size $k$ and the space mesh size $\Delta S$. Furthermore, no spurious oscillations are to be seen in the solution or its $\Delta$ (as is the case with some other methods). A disadvantage is that it is only first order accurate in k . On the other hand, this can be rectified by using extrapolation and this results in a second-order scheme.
+
+The Crank Nicolson is a variation of (2) but in this case we take averages of $V$ at levels $n$ and $n+1$ when approximating the derivative with respect to $t$. We define the quantity
+
+
+\begin{equation*}
+V_{j}^{n+\frac{1}{2}} \equiv \frac{1}{2}\left(V_{j}^{n+1}+V_{j}^{n}\right) \tag{4}
+\end{equation*}
+
+
+Then the Crank Nicolson method is defined as follows:
+
+
+\begin{align*}
+& -\frac{V_{j}^{n+1}-V_{j}^{n}}{k}+r j \Delta S\left(\frac{V_{j+1}^{n+\frac{1}{2}}-V_{j-1}^{n+\frac{1}{2}}}{2 \Delta S}\right) \\
+& +\frac{1}{2} \sigma^{2} j^{2} \Delta S^{2}\left(\frac{V_{j+1}^{n+\frac{1}{2}}-2 V_{j}^{n+\frac{1}{2}}+V_{j-1}^{n+\frac{1}{2}}}{\Delta S^{2}}\right)  \tag{5}\\
+& =\tau V_{j}^{n+\frac{1}{2}}
+\end{align*}
+
+
+Again, this is a system that can be posed in the form (3) and hence can be solved by standard matrix solver techniques at each time level.
+
+The Crank Nicolson method has gained wide acceptance in the financial literature and it seems to be the de-facto finite difference scheme for one-factor and two-factor Black Scholes equations. It has second order accuracy in the parameter k and is stable. Unfortunately, it has been known for some considerable time (Il'in 1969) that centred differencing schemes in space combined with averaging in time (what essentially CN is in this context) lead to spurious oscillations in the approximate solution. These oscillations have nothing to do with the physical or financial problem that the scheme is approximating.
+
+\section*{3 The Problems with Crank Nicolson: the Details}
+We now give a detailed discussion of Crank Nicolson and when it breaks down or fails to live up to its perceived expectations.
+
+\subsection*{3.1 A Critique of Crank-Nicolson}
+The Crank Nicolson method has become a very popular finite difference scheme for approximating the Black Scholes equation.
+
+This equation is an example of a convection-diffusion equation and it has been known for some time that centred-difference schemes are inappropriate for approximating it (Il'in 1969, Duffy 1980). In fact, many independent discoveries of novel methods have been made in order to solve difficult convection-diffusion problems in fluid dynamics, atmospheric pollution modelling, semiconductor equations, the Fokker-Planck equation and groundwater transport (Morton 1996).
+
+The main problem is that traditional finite difference schemes start to oscillate when the coefficient of the second derivative (the diffusion term) is very small or when the coefficient of the first derivative (the convection term) is large (or both). In this case, the mesh size h in the space direction must be smaller than a certain critical value if we wish to avoid these oscillations. This problem has been known since the 1950's (see de Allen 1955).
+
+We now discuss the Crank Nicolson from a number of viewpoints. For convenience and generality reasons, we cast the Black Scholes equation\\
+as a generic parabolic initial boundary value problem in the domain $D=(A, B) X(0, T)$ where $A<B$ :
+
+
+\begin{align*}
+& L u \equiv-\frac{\partial u}{\partial t}+\sigma(x, t) \frac{\partial^{2} u}{\partial x^{2}}+\mu(x, t) \frac{\partial u}{\partial x}+b(x, t) u=f(x, t) \text { in } D \\
+& u(x, 0)=\varphi(x), x \in(A, B)  \tag{6}\\
+& u(A, t)=g_{0}(t), u(B, t)=g_{1}(t), t \in(0, T)
+\end{align*}
+
+
+In this case the time variable $t$ corresponds to increasing time while the space variable $x$ corresponds to the underlying asset price $S$. We specify Dirichlet boundary conditions on a finite space interval and this is a common situation for to several kinds of exotic options, for example barrier options. Actually, the system (6) is more general than the original Black Scholes equation.
+
+\subsection*{3.2 How are Derivatives approximated?}
+There are two kinds of independent variables associated with the one-factor Black Scholes as can be seen in (6). These correspond to the $x$ and $t$ variables. We concentrate on the $x$ direction for the moment. We discretise in this direction using centred differences at the point ( $j h, n k$ ):
+
+$$
+\left\{\begin{array}{l}
+\frac{\partial^{2} u}{\partial x^{2}} \sim \frac{u_{j+1}^{n}-2 u_{j}^{n}+u_{j-1}^{n}}{h^{2}} \\
+\frac{\partial u}{\partial x} \sim \frac{u_{j+1}^{n}-u_{j-1}^{n}}{2 h}
+\end{array}\right.
+$$
+
+Using this knowledge we can apply the Crank-Nicolson method to (6), namely:
+
+\[
+\left\{\begin{array}{l}
+-\frac{u_{j}^{n+1}-u_{j}^{n}}{k}+\sigma_{j}^{n+\frac{1}{2}} \frac{u_{j+1}^{n+\frac{1}{2}}-2 u_{j}^{n+\frac{1}{2}}+u_{j-1}^{n+\frac{1}{2}}}{h^{2}}  \tag{7}\\
++\mu_{j}^{n+\frac{1}{2}} \frac{u_{j+1}^{n+\frac{1}{2}}-u_{j-1}^{n+\frac{1}{2}}}{2 h} \\
++b_{j}^{n+\frac{1}{2}} u_{j}^{n+\frac{1}{2}}=f_{j}^{n+\frac{1}{2}}
+\end{array}\right.
+\]
+
+A bit of simple arithmetic allows us to rewrite (7) in the standard form:
+
+\[
+\left\{\begin{array}{l}
+a_{j}^{n} u_{j-1}^{n+1}+b_{j}^{n} u_{j}^{n+1}+c_{j}^{n} u_{j+1}^{n+1}=F_{j}^{n}  \tag{8}\\
+F_{j}^{n} \text { known quantity }
+\end{array}\right.
+\]
+
+Of course, this system of equations can be posed in the form of a matrix system. A number of researchers have examined such systems in conjunction with convection-diffusion equations (for example, Farrell 2000, Morton 1996). A critical observation is that if the coefficient $a_{j}^{n}$ appearing in is not positive then the resulting solution will show oscillatory behaviour at best or produce non-physical solutions at worst.
+
+This will give problems in general for Black Scholes applications where the volatility is a decaying function of time (see van Deventer 1997),\\
+for example:
+
+$$
+\sigma(t)=\sigma_{0} e^{-\alpha(T-t)}
+$$
+
+where $\sigma_{0}$ and $\alpha$ are given constants.\\
+We speak of a singular perturbation problem associated with problem (6) when the coefficient of the second derivative is small (see Duffy 1980). In this case traditional finite difference schemes perform badly at the boundary layer situated at $x=0$. In fact, if we formally set volatility to zero in equation (7) we get a so-called weakly stable difference scheme (see Peaceman 1977) that approximate the first-order hyperbolic equation
+
+$$
+-\frac{\partial u}{\partial t}+\mu \frac{\partial u}{\partial x}+b u=f
+$$
+
+This has the consequence that the initial errors in the scheme are not dissipated and hence we can expect oscillations especially in the presence of rounding errors. We need other one-sided schemes in this degenerate case (Peaceman 1977, Duffy 1977).
+
+\subsection*{3.3 Boundary Conditions}
+In general, we distinguish three kinds of boundary conditions:
+
+\begin{itemize}
+  \item Dirichlet (as seen in the system (6))
+  \item Neumann conditions
+  \item Robin conditions
+\end{itemize}
+
+The last two boundary conditions involve the first derivative of the unknown $u$ at the boundaries. We must then decide on how we are going to approximate this derivative. We can choose between first-order accurate one-sided schemes and ghost points (Thomas 1998) that produce a sec-ond-order approximation to the first derivative. We must thus be aware of the fact that the low-order accuracy at the boundary will adversely impact the second-order accuracy in the interior of the region of interest. To complicate matters, some models have a boundary condition involving the second derivative of u or even a ‘linearity’ boundary condition (see Tavella 2000).
+
+Finally, the boundary conditions may be discontinuous. We may resort to nonuniform meshes to accommodate the discontinuities. This strategy will also destroy the second-order accuracy of the CrankNicolson method. The conclusion is that the wrong discrete boundary conditions adversely affect the accuracy of the finite difference scheme.
+
+\subsection*{3.4 Initial Conditions}
+It is well-known that discontinuous initial conditions adversely impact the accuracy of finite difference schemes (see Smith 1978). In particular, the solution of the difference schemes exhibits oscillations just after $\mathrm{t}=0$ but the solution becomes more smooth as time goes on. This has consequences for options pricing applications because in general the initial condition (this is in fact a payoff function) is not always smooth. For example, the payoff function for a European call option is:
+
+$$
+C=\max (S-K, 0)
+$$
+
+where $K$ is the strike price and $S$ is the stock price. Its derivative is given by the jump function:
+
+$$
+\frac{\partial C}{\partial S}=\left\{\begin{array}{l}
+0, S \leq K \\
+1, S>K
+\end{array}\right.
+$$
+
+This derivative is discontinuous and in general we can expect to get bad accuracy at the points of discontinuity (in this case, at the strike price where at-the-money issues play an important role). It is possible to determine mathematically what the accuracy is in some special cases (Smith 1978) but numerical experiments show us that things are going wrong as well. Of course, if the option price is badly approximated there is not much hope of getting good approximations to the delta and gamma. This statement is borne out in practice. Another source of annoyance is that the boundary and initial conditions may not be compatible with each other. By compatibility, we mean that the solution is smooth at the corners ( $\mathrm{A}, 0$ ) and ( $\mathrm{B}, 0$ ) of the region of interest and we thus demand that the solution is the same irrespective of the direction from which we approach the corners. If we assume that $u(x, t)$ is continuous as we approach the boundaries, then we must satisfy the compatibility conditions:
+
+$$
+\left\{\begin{array}{l}
+\varphi(A) \equiv u(A, 0)=g_{0}(0) \\
+\varphi(B) \equiv u(B, 0)=g_{1}(0)
+\end{array}\right.
+$$
+
+Failure to take these conditions into account in a finite difference scheme will lead to inaccuracies at the corner points of the region of interest. On the upside, the discontinuities are quickly damped out.
+
+\subsection*{3.5 Proving Stability}
+Much of the literature uses the von Neumann theory to prove stability of finite difference schemes (Tavella 2000). This theory was developed by John von Neumann, a Hungarian-American mathematician, the father of the modern computer and probably one of the greatest brains of the twentieth century. Strictly speaking, the von Neumann approach is only valid for constant coefficient, linear initial value problems. The Black Scholes equation does not fall under this category. Furthermore, much work has been done in the engineering field to prove stability in other ways, for example using the maximum principle and matrix theory (Morton 1996, Duffy 1980). A discussion of von Neumann stability for the constant coefficient, linear convection-diffusion equation can be found in Thomas 1998.
+
+\section*{4 An Introduction to Exponentially Fitted Finite Difference Schemes}
+\subsection*{4.1 A new Class of Robust Difference Schemes}
+Exponentially fitted schemes are stable, have good convergence properties and do not produce spurious oscillations. In order to motivate what an exponentially fitted difference scheme is, let us look at the simple\\
+boundary value problem:
+
+
+\begin{align*}
+& \sigma \frac{d^{2} u}{d x^{2}}+\mu \frac{d u}{d x}=0 \quad \text { in } \quad(A, B)  \tag{9}\\
+& u(A)=\beta_{0}, u(B)=\beta_{1}
+\end{align*}
+
+
+Here we assume that $\sigma$ and $\mu$ are positive constants. We now approximate (9) by the difference scheme defined as follows:
+
+
+\begin{align*}
+& \sigma \rho D_{+} D_{-} U_{j}+\mu D_{0} U_{j}=0, j=1, \ldots, J-1 \\
+& U_{0}=\beta_{0}, U_{J}=\beta_{1} . \tag{10}
+\end{align*}
+
+
+where $\rho$ is a so-called fitting factor (this factor is identically equal to 1 in the case of the centred difference scheme. We now choose $\rho$ so that the solutions of (9) and (10) are identical at the mesh-points. Some easy arithmetic shows that
+
+$$
+\rho=\frac{\mu h}{2 \sigma} \operatorname{coth} \frac{\mu h}{2 \sigma}
+$$
+
+where $\operatorname{coth} x$ is the hyperbolic cotangent function defined by
+
+$$
+\operatorname{coth} x=\frac{e^{x}+e^{-x}}{e^{x}-e^{-x}}=\frac{e^{2 x}+1}{e^{2 x}-1}
+$$
+
+The fitting factor $\rho$ will be used when developing fitted difference schemes for variable coefficient problems. In particular, we discuss the following problem:
+
+
+\begin{align*}
+& \sigma(x) \frac{d^{2} u}{d x^{2}}+\mu(x) \frac{d u}{d x}+b(x) u=f(x)  \tag{11}\\
+& u(A)=\beta_{0}, u(B)=\beta_{1}
+\end{align*}
+
+
+where $\sigma, \mu$ and $b$ are given continuous functions, and
+
+$$
+\sigma(x) \geq 0, \mu(x) \geq \alpha>0, b(x) \leq 0 \text { for } x \in(A, B) .
+$$
+
+The fitted difference scheme that approximates (11) is defined by:
+
+
+\begin{align*}
+& \rho_{j}^{h} D_{+} D_{-} U_{j}+\mu_{j} D_{0} U_{j}+b_{j} U_{j}=f_{j}, \quad j=1, \ldots, J-1  \tag{12}\\
+& U_{0}=\beta_{0}, \quad U_{J}=\beta_{1}
+\end{align*}
+
+
+where
+
+
+\begin{align*}
+\rho_{j}^{h} & =\frac{\mu_{j} h}{2} \operatorname{coth} \frac{\mu_{j} h}{2 \sigma_{j}}  \tag{13}\\
+\sigma_{j} & =\sigma\left(x_{j}\right), \mu_{j}=\mu\left(x_{j}\right), b_{j}=b\left(x_{j}\right), f_{j}=f\left(x_{j}\right)
+\end{align*}
+
+
+We now state the following fundamental results (see Il'in 1969, Duffy 1980).
+
+The solution of scheme (12) is uniformly stable, that is
+
+$$
+\left|U_{j}\right| \leq\left|\beta_{0}\right|+\left|\beta_{1}\right|+\frac{1}{\alpha} \max _{k=1, \ldots, J}\left|f_{k}\right|, \quad j=1, \ldots, J-1
+$$
+
+Furthermore, scheme (12) is monotone in the sense that the matrix representation of (12)
+
+$$
+A U=F
+$$
+
+where $U={ }^{t}\left(U_{1}, \ldots, U_{J-1}\right), \quad F={ }^{t}\left(f_{1}, \ldots, f_{J-1}\right)$ and
+
+
+\begin{align*}
+& \mathbf{A}=\left(\begin{array}{ccccc}
+\ddots & & \ddots & & 0 \\
+& \ddots & & a_{j, j+1} & \\
+\ddots & & a_{j, j} & & \ddots \\
+& a_{j, j-1} & & \ddots & \\
+0 & & \ddots & & \ddots
+\end{array}\right)  \tag{14}\\
+& a_{j, j-1}=\frac{\rho_{j}^{h}}{h^{2}}-\frac{\mu_{j}}{2 h}>0 \quad \text { always } \\
+& a_{j, j}=-\frac{2 \rho_{j}^{h}}{h^{2}}+b_{j}<0 \quad \text { always } \\
+& a_{j, j+1}=\frac{\rho_{j^{h}}}{h^{2}}+\frac{\mu_{j}}{2 h}>0 \quad \text { always }
+\end{align*}
+
+
+produces positive solutions from positive input.\\
+Sufficient conditions for a difference scheme to be monotone have been investigated by many authors in the last 30 years; we mention the work of Samarski 1976 and Stoyan 1979.
+
+Stoyan also produced stable and convergent difference schemes for the convection-diffusion equation producing results and conclusions that are similar to the author's work (see Duffy 1980).
+
+Let $u$ and $U$ be the solutions of (11) and (12), respectively. Then
+
+$$
+\left|u\left(x_{j}\right)-U_{j}\right| \leq M h
+$$
+
+where $M$ is a positive constant that is independent of $h$ and $\sigma$ (Il'in (1969).\\
+The conclusion is that the fitted scheme (12) is stable, convergent and produces no oscillations. In particular, the scheme 'degrades gracefully' to a well-known stable schemes when $\sigma$ tends to zero.
+
+\section*{5 Exponentially Fitted Schemes for the Black Scholes Equation}
+We discretise the rectangle $[A, B] \times[0, T]$ as follows:
+
+$$
+\begin{aligned}
+A & =x_{0}<x_{1}<\ldots<x_{J}=B\left(h=x_{j}-x_{j-1}\right), h \text { constant } \\
+0 & =t_{0}<t_{1}<\ldots<t_{N}=T(k=T / N), k \text { constant }
+\end{aligned}
+$$
+
+Consider again the operator $L$ in equation (6) defined by
+
+$$
+L u \equiv-\frac{\partial u}{\partial t}+\sigma(x, t) \frac{\partial^{2} u}{\partial x^{2}}+\mu(x, t) \frac{\partial u}{\partial x}+b(x, t) u .
+$$
+
+We replace the derivatives in this operator by their corresponding divided differences and we define the fitted operator $L_{k}^{h}$ by
+
+
+\begin{equation*}
+L_{k}^{h} U_{j}^{n} \equiv-\frac{U_{j}^{n+1}-U_{j}^{n}}{k}+\rho_{j}^{n+1} D_{+} D_{-} U_{j}^{n+1}+\mu_{j}^{n+1} D_{0} U_{j}^{n+1}+b_{j}^{n+1} U_{j}^{n+1} \tag{15}
+\end{equation*}
+
+
+Here we use the notation
+
+$$
+\varphi_{j}^{n+1}=\varphi\left(x_{j}, t_{n+1}\right) \text { in general }
+$$
+
+and
+
+$$
+\rho_{j}^{n+1} \equiv \frac{\mu_{j}^{n+1} h}{2} \operatorname{coth} \frac{\mu_{j}^{n+1} h}{2 \sigma_{j}^{n+1}}
+$$
+
+We now formulate the fully-discrete scheme that approximates the initial boundary value problem (6):
+
+Find a discrete function $\left\{U_{j}^{n}\right\}$ such that
+
+
+\begin{align*}
+& L_{k}^{h} U_{j}^{n}=f_{j}^{n+1}, j=1, \ldots, J-1, n=0, \ldots, N-1 \\
+& U_{0}^{n}=g_{0}\left(t_{n}\right), U_{J}^{n}=g_{1}\left(t_{n}\right), n=0, \ldots, N  \tag{16}\\
+& U_{j}^{0}=\varphi\left(x_{j}\right), j=1, \ldots, J-1
+\end{align*}
+
+
+This is a two-level implicit scheme. We wish to prove that scheme (16) is stable and is consistent with the initial boundary value problem (6). We prove stability of (16) by the so-called discrete maximum principle instead of the von Neumann stability analysis. The von Neumann approach is well known but the discrete maximum principle is more general and easier to understand and to apply in practice. It is also the defacto standard technique for proving stability of finite difference and finite element schemes (see Morton 1996, Farrell 2000).
+
+Lemma 1 Let the discrete function $w_{j}^{n}$ satisfy $L_{k}^{h} w_{j}^{n} \leq 0$ in the interior of the mesh with $w_{j}^{n} \geq 0$ on the boundary $\Gamma$.\\
+Then $w_{j}^{n} \geq 0, \forall j=0, \ldots, J ; n=0, \ldots, N$.\\
+Proof: We transform the inequality $L_{k}^{h} w_{j}^{n} \leq 0$ into an equivalent vector inequality. To this end, define the vector $W^{n}={ }^{t}\left(w_{1}^{n}, \ldots, w_{J-1}^{n}\right)$. Then the inequality $L_{k}^{h} w_{j}^{n} \leq 0$ is equivalent to the vector inequality
+
+
+\begin{equation*}
+A^{n} W^{n+1} \geq W^{n} \tag{17}
+\end{equation*}
+
+
+where
+
+$$
+A^{n}=\left(\begin{array}{ccccc}
+\ddots & & \ddots & & 0 \\
+& \ddots & & t_{j}^{n} & \\
+\ddots & & s_{j}^{n} & & \ddots \\
+& r_{j}^{n} & & \ddots & \\
+0 & & \ddots & & \ddots
+\end{array}\right)
+$$
+
+$$
+\begin{aligned}
+& r_{j}^{n}=\left(-\frac{\rho_{j}^{n}}{h^{2}}+\frac{\mu_{j}^{n}}{2 h}\right) k \\
+& s_{j}^{n}=\left(\frac{2 \rho_{j}^{n}}{h^{2}}-b_{j}^{n}+k^{-1}\right) k \\
+& t_{j}^{n}=\left(-\left(\frac{\rho_{j}^{n}}{h^{2}}+\frac{\mu_{j}^{n}}{2 h}\right)\right) k
+\end{aligned}
+$$
+
+It is easy to show that the matrix $A^{n}$ has non-positive off-diagonal elements, has strictly positive diagonal elements and is irreducibly diagonally dominant. Hence (see Varga 1962 pages 84-85) $A^{n}$ is non-singular and its inverse is positive:
+
+$$
+\left(A^{n}\right)^{-1} \geq 0
+$$
+
+Using this result in (17) gives the desired result.\\
+Lemma 2 Let $\left\{U_{j}^{n}\right\}$ be the solution of scheme (16) and suppose that
+
+$$
+\begin{aligned}
+& \max \left|U_{j}^{n}\right| \leq m \text { on } \Gamma \text { for all } j \text { and } n \\
+& \max \left|f_{j}^{n}\right| \leq N \text { in } D \text { for all } j \text { and } n
+\end{aligned}
+$$
+
+Then
+
+$$
+\max _{j}\left|U_{j}^{n}\right| \leq-\frac{N}{\beta}+m \text { in } \bar{D}
+$$
+
+Proof: Define the discrete barrier function
+
+$$
+w_{j}^{n}=-\frac{N}{\beta}+m \pm U_{j}^{n}
+$$
+
+Then $w_{j}^{n} \geq 0$ on $\Gamma$. Furthermore,
+
+$$
+L_{k}^{h} w_{j}^{n} \leq 0
+$$
+
+Hence $w_{j}^{n} \geq 0$ in $\bar{Q}$ which proves the result.\\
+Let $u(x, t)$ and $\left\{U_{j}^{n}\right\}$ be the solutions of (6) and (16), respectively.\\
+Then
+
+
+\begin{equation*}
+\left|u\left(x_{j}, t_{n}\right)-U_{j}^{n}\right| \leq M(h+k) \tag{18}
+\end{equation*}
+
+
+where $M$ is a constant that is independent of $h, k$ and $\sigma$.\\
+This result shows that convergence is assured regardless of the size of $\sigma$. No classical scheme (for example, centred differencing in $x$ and Crank Nicolson in time) have error bounds of the form (18) where $M$ is independent of $h, k$ and $\sigma$.
+
+Summarising, the advantages of the fitted scheme are:
+
+\begin{itemize}
+  \item It is uniformly stable for all values of $h, k$ and $\sigma$.
+  \item It is oscillation-free. Its solution converges to the exact solution of (6). In particular, it is a powerful scheme for the Black-Scholes equation and its generalisations.
+  \item It is easily programmed, especially if we use object-oriented design and implementation techniques.
+\end{itemize}
+
+\section*{6 Problems with Small Volatility}
+We now examine some 'extreme' cases in system (16). In particular, we examine the cases\\
+(pure convection/drift) $\sigma \rightarrow 0$\\
+(pure diffusion/volatility) $\mu \rightarrow 0$\\
+We shall see that the 'limiting' difference schemes are well-known schemes and this is reassuring. To examine the first extreme case we must know what the limiting properties of the hyperbolic cotangent function are:
+
+$$
+\lim _{\sigma \rightarrow 0} \rho_{j}^{n}=\lim _{\sigma \rightarrow 0} \frac{\mu_{j}^{n} h}{2} \operatorname{coth} \frac{\mu_{j}^{n} h}{2 \sigma_{j}^{n}}
+$$
+
+We use the formula
+
+$$
+\lim _{\sigma \rightarrow 0} \frac{\mu h}{2} \operatorname{coth} \frac{\mu h}{2 \sigma}=\left\{\begin{array}{l}
++\frac{\mu h}{2} \text { if } \mu>0 \\
+-\frac{\mu h}{2} \text { if } \mu<0
+\end{array}\right.
+$$
+
+Inserting this result into the first equation in (16) gives us the first-order scheme
+
+$$
+\begin{aligned}
+& \mu>0, \quad-\frac{U_{j}^{n+1}-U_{j}^{n}}{k}+\mu_{j}^{n+1} \frac{\left(U_{j+1}^{n+1}-U_{j}^{n+1}\right)}{h}+b_{j}^{n+1} U_{j}^{n+1}=f_{j}^{n+1} \\
+& \mu<0, \quad-\frac{U_{j}^{n+1}-U_{j}^{n}}{k}+\mu_{j}^{n+1} \frac{\left(U_{j}^{n+1}-U_{j-1}^{n+1}\right)}{h}+b_{j}^{n+1} U_{j}^{n+1}=f_{j}^{n+1}
+\end{aligned}
+$$
+
+These are so-called implicit upwind schemes and are stable and convergent (Duffy 1977, Dautray 1993). We thus conclude that the fitted scheme degrades to an acceptable scheme in the limit. The case $\mu \rightarrow 0$ uses the formula
+
+$$
+\lim _{x \rightarrow 0} x \operatorname{coth} x=1
+$$
+
+Then the first equation in system (16) reduces to the equation
+
+$$
+-\frac{U_{j}^{n+1}-U_{j}^{n}}{k}+\sigma_{j}^{n+1} D_{+} D_{-} U_{j}^{n+1}+b_{j}^{n+1} U_{j}^{n+1}=f_{j}^{n+1}
+$$
+
+This is a standard approximation to pure diffusion problems and such schemes can be found in standard numerical analysis textbooks.
+
+These limiting cases reassure us that the fitted method behaves well for 'extreme' parameter values.
+
+\section*{7 Exponential Fitting and Exotic Options}
+We have applied the method to a range of plain and exotic European and American type options. In particular, we have applied it to various kinds\\
+of barrier options (see Topper 1998, Haug 1998), for example:
+
+\begin{itemize}
+  \item Double barrier call options
+  \item Single barrier call options
+  \item Equations with time-dependent volatilities (for example, a linear function of time)
+  \item Asymmetric plain vanilla power call options
+  \item Asymmetric capped power call options
+\end{itemize}
+
+We have compared our results with those in Haug 1998 and Topper 1998 and they compare favourably (Mirani 2002). The main difference between these types lies in the specific payoff functions (initial conditions) and boundary conditions. Since we are working with a specific kind of parabolic problem these functions must be specified by us. For example, for a double barrier option we must give the value of the option at these barriers while for a single barrier option we define the 'down' barrier at $S=0$. Summarising, the exponentially fitted finite difference scheme gives good approximations to the option price and delta of the above exotic option types. We have compared the results with Monte Carlo, Haug 1998 and Topper 1998.
+
+\section*{8 Uniform Approximation of the Greeks}
+It is well known by now that CN produces bad approximation to option delta and gamma (see for example, Zvan 1997, Cooney 1999). Thus, we need to devise schemes that do give uniform approximation to option sensitivities, especially in the vicinity of the strike price K. The exponentially fitted scheme (16) is a good candidate and more information can be found in Duffy 2001 and Cooney 1999.
+
+\subsection*{8.1 Is there more Hope? The Keller Scheme}
+In this section however, we give a short overview of the Box Scheme (Keller 1971) that resolves many of the problems associated with Crank Nicolson. In short, we reduce the second-order Black Scholes equation to a system of first-order equations containing at most first-order derivatives. We then approximate the first derivatives in $x$ and $t$ by averaging in a box. We motivate the box scheme by examining the generic parabolic initial boundary value problem in the space interval $(0,1)$ :
+
+
+\begin{align*}
+& \frac{\partial u}{\partial t}=\frac{\partial}{\partial x}\left(a \frac{\partial u}{\partial x}\right)+c u+S, 0<x<1, t>0 \\
+& u(x, 0)=g(x), 0<x<1  \tag{19}\\
+& \alpha_{0} u(0, t)+\alpha_{1} a(0, t) u_{x}(0, t)=g_{0}(t) \\
+& \beta_{0} u(1, t)+\beta_{1} a(1, t) u_{x}(1, t)=g_{1}(t)
+\end{align*}
+
+
+Here $u$ is the (unknown) solution to the problem that satisfies the selfadjoint equation in (19) and it must also satisfy the initial and boundary conditions (note the latter contain derivatives of the unknown at the boundaries of the interval).In general, the coefficients in (19) are functions of both $x$ and $t$.
+
+We now transform (19) to a first order system by defining a new variable $v$. The new transformed set of equations is given by:
+
+
+\begin{align*}
+& a \frac{\partial u}{\partial x}=v \\
+& \frac{\partial v}{\partial x}=\frac{\partial u}{\partial t}-c u-S \\
+& u(x, 0)=g(x)  \tag{20}\\
+& \alpha_{0} u(0, t)+\alpha_{1} v(0, t)=g_{0}(t) \\
+& \beta_{0} u(1, t)+\beta_{1} v(1, t)=g_{1}(t)
+\end{align*}
+
+
+We now see that we have to do with a first order system of equations with no derivatives on the boundaries!
+
+We now need to introduce some notation. First, we define average values for $x$ and $t$ coordinates as follows:
+
+$$
+\begin{aligned}
+& x_{j \pm 1 / 2}=\frac{1}{2}\left(x_{j}+x_{j \pm 1}\right) \\
+& t_{n \pm 1 / 2}=\frac{1}{2}\left(t_{n}+t_{n \pm 1}\right)
+\end{aligned}
+$$
+
+and for general nets (in principle the approximations to $u$ and $v$ ) by
+
+$$
+\begin{aligned}
+\phi_{j \pm 1 / 2}^{n} & =\frac{1}{2}\left(\phi_{j}^{n}+\phi_{j \pm 1}^{n}\right) \\
+\phi_{j}^{n \pm 1 / 2} & =\frac{1}{2}\left(\phi_{j}^{n}+\phi_{j}^{n \pm 1}\right)
+\end{aligned}
+$$
+
+Finally, we define notation for divided differences in the $x$ and $t$ directions as follows:
+
+$$
+\begin{aligned}
+D_{x}^{-} \phi_{j}^{n} & =h_{j}^{-1}\left(\phi_{j}^{n}-\phi_{j-1}^{n}\right) \\
+D_{t}^{-} \phi_{j}^{n} & =k_{n}^{-1}\left(\phi_{j}^{n}-\phi_{j}^{n-1}\right)
+\end{aligned}
+$$
+
+We are now ready for the new scheme. To this end, we use one-sided difference schemes in both directions while taking averages and we thus solve for both $u$ and $v$ simultaneously at each time level:
+
+
+\begin{align*}
+& a_{j-1 / 2}^{n} D_{x}^{-} u_{j}^{n}=v_{j-1 / 2}^{n} \\
+& D_{x}^{-} v_{j}^{n-1 / 2}=D_{t}^{-} u_{j-1 / 2}^{n}-c_{j-1 / 2}^{n-1 / 2} u_{j-1 / 2}^{n-1 / 2}-S_{j-1 / 2}^{n-1 / 2}  \tag{21}\\
+& 1 \leq j \leq J, 1 \leq n \leq N
+\end{align*}
+
+
+The corresponding boundary and initial conditions are:
+
+\[
+\left.\begin{array}{l}
+\alpha_{0} u_{0}^{n}+\alpha_{1} v_{0}^{n}=g_{0}^{n}  \tag{22}\\
+\beta_{0} u_{J}^{n}+\beta_{1} v_{J}^{n}=g^{n}
+\end{array}\right\} 1 \leq n \leq N
+\]
+
+The box scheme has a number of very desirable properties, namely:\\
+a) it is simple, efficient and easy to program b) it is unconditionally stable c) it approximates $u$ and its partial derivative in $x$ with secondorder accuracy. For the Black Scholes equation this means that we can approximate both option price and the option delta without trace of spurious oscillation as is experienced with Crank Nicolson d) Richardson extrapolation is applicable and yields two orders of accuracy improvement per extrapolation (with nonuniform nets!) e) It supports data, coefficients and solutions that are only piecewise smooth. In a financial setting it is able to model piecewise smooth payoff functions. We then define the approximate initial condition as follows:
+
+
+\begin{equation*}
+v_{j-\frac{1}{2}}^{0}=a_{j-\frac{1}{2}}^{0} \frac{d g\left(x_{j-1 / 2}\right)}{d x}, 1 \leq j \leq J \tag{23}
+\end{equation*}
+
+
+For piecewise smooth boundary conditions we use the following tactic:
+
+
+\begin{align*}
+& \alpha_{0} u_{0}^{n-\frac{1}{2}}+\alpha_{1} v_{0}^{n-\frac{1}{2}}=g_{0}^{n-\frac{1}{2}} \\
+& \beta_{0} u_{J}^{n-\frac{1}{2}}+\beta_{1} v_{J}^{n-\frac{1}{2}}=g_{1}^{n-\frac{1}{2}}  \tag{24}\\
+& 1 \leq n \leq N \\
+& \text { Discontinuities at } t=t_{n}!
+\end{align*}
+
+
+Of course we are assuming that the mesh points are sitting on the discontinuities! f)
+
+\section*{9 Conclusions}
+We have discussed the popular Crank Nicolson method from a number of viewpoints. In particular, we have made an inventory of the situations where it breaks down or where it deviates from our expectations:
+
+\begin{itemize}
+  \item The standard von Neumann stability analysis fail to predict the infamous spurious oscillation problem. Hedging applications that use CN will run the risk of inaccuracy at values in the pay off function where this function is not smooth (for example, the strike price)
+  \item Second-order accuracy is lost when using non-uniform meshes. Sometimes uniform meshes are not sufficient to approximate the exact solution in a boundary layer (small volatility) or with nasty pay-off functions (for example, binary options or barriers options with discrete and intermittent barriers). A good discussion of how Crank Nicolson breaks down for barrier options is given in Tavella 2000.
+  \item There are finite difference schemes that are just as good as, or even better than Crank Nicolson, for example fully implicit schemes with extrapolation or Runge-Kutta (Crouzeix 1975).
+  \item For two-factor and multi-factor problems, we use predictor-corrector, Alternating Direction Implicit (ADI) and Operator Splitting methods (see Peaceman 1977, Janenko 1971, Sun 1999). In these cases we see that Crank Nicolson is just one possibility for time discretisation.
+\end{itemize}
+
+A modest proposal would be to investigate robust and effective alternatives to the Crank Nicolson schemes. This will hopefully improve the FDM gene pool as it were.
+
+\section*{Acknowledgements}
+Permission to use some of the text in this article has been given by John Wiley publishers and is based on Daniel Duffy's book Designing and Implementing Financial Instrument Pricing using C++ (ISBN: 0-470-85509-6).
+
+\section*{The Author}
+Daniel Duffy works for Datasim (\href{http://www.datasim.nl}{www.datasim.nl}), an Amsterdam-based trainer and software developer. He has been working in IT since 1979 and with object-oriented technology since 1987. He received his \href{http://M.Sc}{M.Sc}. and PhD theses (in numerical analysis) from Trinity College, Dublin. At present he is working on Finite Differences and C++ for instrument pricing problems. He can be contacted at \href{mailto:dduffy@datasim.nl}{dduffy@datasim.nl}
+
+\section*{REFERENCES}
+\begin{itemize}
+  \item Aho, A., Kernighan, B. and Weinberger, P. 1988 The AWK Programming Language Addison-Wesley\\
+de Allen, D., R. Southwell 1955 Relaxation Methods applied to determining the motion, in two dimensions, of a viscous fluid past a fixed cylinder Quart. J. Mech. Appl. Math., 129-145
+  \item Bhansali 1998 V. Pricing and Managing Exotic and Hybrid Options McGraw-Hill Irwin Library Series New York
+  \item Cooney, M. 1999 Benchmarking the Black Scholes Equation by Finite Differences MSc thesis Trinity College Dublin
+  \item Crank, J., and P. Nicolson, 1947 A practical method for numerical evaluation of solutions of partial differential equations of the heat-conduction type, Proc. Cambridge Philos. Soc., 43, 50-67, re-published in: John Crank 80th birthday special issue Adv. Comput. Math. 6 (1997) 207-226
+  \item Crouzeix, M. 1975 On the Approximation of linear Operational Differential Equations by the Runge-Kutta Method, Doctorate Thesis, Paris VI University, France
+  \item Dautray, R., J. L. Lions 1993 Mathematical Analysis and Numerical Methods for Science and Technology, Volume 6. Springer-Verlag Berlin\\
+van Deventer, D. R., K. Imai 1997 Financial Risk Analytics, McGraw-Hill Chicago
+  \item Doolan, E. P. et al 1980 Uniform Numerical Methods for Problems with Initial and Boundary Layers Boole Press, Dublin, Ireland
+  \item Douglas, J. and Rachford, H.H. 1955 On the Numerical Solution of Heat Conduction Equations in Two and Three Dimensions Trans. Am. Math. 82, 421-439
+  \item Duffy, D. 1977 Finite Elements for Mixed Initial Boundary Value Problems for Hyperbolic Systems of Equations, \href{http://M.Sc}{M.Sc}. Thesis Trinity College Dublin, Ireland
+  \item Duffy, D. 1980 Uniformly Convergent Difference Schemes for Problems with a Small Parameter in the Leading Derivative Ph.D. thesis Trinity College Dublin
+  \item Duffy, D. 2001 Robust and Accurate Finite Difference Methods in Option Pricing: One Factor Models, working report Datasim \href{http://www.datasim-component.com}{www.datasim-component.com}
+  \item Duffy, D. 2004 Designing and Implementing Financial Instrument Pricing using C++ John Wiley and Sons Chichester
+\end{itemize}
+
+\section*{LOW VOLATILITY OPTIONS AND NUMERICAL DIFFUSION OF FINITE DIFFERENCE SCHEMES }
+
+
+\begin{abstract}
+In this paper we explore the numerical diffusion introduced by two nonstandard finite difference schemes applied to the Black-Scholes partial differential equation for pricing discontinuous payoff and low volatility options. Discontinuities in the initial conditions require applying nonstandard non-oscillating finite difference schemes such as the exponentially fitted finite difference schemes suggested by D. Duffy and the Crank-Nicolson variant scheme of Milev-Tagliani. We present a short survey of these two schemes, investigate the origin of the respective artificial numerical diffusion and demonstrate how it could be diminished.
+\end{abstract}
+
+\begin{enumerate}
+  \item Introduction. In this paper we discuss the finite difference method for solving a partial differential one factor model problem. In details, nonstandard option pricing models characterized by discontinuities in terminal/boundary conditions and low volatility will be considered. Options characterized by
+\end{enumerate}
+
+\footnotetext{2010 Mathematics Subject Classification: 65M06, 65M12.\\
+Key words: Numerical diffusion, spurious oscillations, Black-Scholes equation, low volatility options, finite difference schemes, non-smooth initial conditions.
+}
+discontinuities and low volatility represent a challenge both to finite centreddifference schemes, due to spurious oscillations arising close to discontinuities and to up-wind schemes due to artificial diffusion. Then the most popular CrankNicolson one is useless, as it is documented in Duffy (Wilmott Magazine, [1]) and other competitive methods have been introduced in the financial literature such as exponentially fitted schemes (Duffy, [2]) and Crank-Nicolson variant (MilevTagliani, [4]).
+
+The aim of the paper is to demonstrate that undesired spurious oscillations could be avoided by applying finite difference schemes that are not standard but very often no attention is given that these schemes introduce artificial numerical diffusion. This requires an additional research of the finite difference scheme that includes exploration not only of the stability and convergence but also of the origin of the numerical diffusion and how it could be diminished.
+
+In order to give an idea of the numerical problems related to discontinuities we consider options satisfying the Black-Scholes equation. If $t$ is the time to expiry $T$ of the contract, $0 \leq t \leq T$, the price $V(S, t)$ of the option satisfies
+
+
+\begin{equation*}
+-\frac{\partial V}{\partial t}+r S \frac{\partial V}{\partial S}+\frac{1}{2} \sigma^{2} S^{2} \frac{\partial^{2} V}{\partial S^{2}}-r V=0 \tag{1}
+\end{equation*}
+
+
+endowed by its initial and boundary conditions. Here, risk free $r$ and volatility $\sigma$ satisfy $r=r(t, S)$ and $\sigma=\sigma(t, S)$. The options to be priced will be barrier options with continuous or discrete monitoring. In the latter case the discontinuities can be renewed at each monitoring date. In presence of an inaccurate finite difference scheme the discontinuity arises spurious oscillations close to barriers with solutions that have no financial meaning, for instance, a negative price. These oscillations, which remain well localized, don't reflect instability, but rather that the discontinuities produced by the barriers. As a result, the oscillations cannot decay fast enough. The mathematical reason rests on the spectrum of the matrix originating from the used finite difference scheme. In the spectrum we find complex or negative eigenvalues close to -1 . Several remedies to spurious oscillations have been suggested in the financial literature (see Pooley et al. (2003), [6]). We focus on the ones based on applying special finite difference schemes. In particular, in Section 2 and 3 we consider
+
+\begin{enumerate}
+  \item The implicit exponentially fitted schemes (see Duffy, [2], 2006);
+  \item The Crank-Nicolson variant scheme (see Milev-Tagliani, [4]), particularly devoted to the Black-Scholes equation;
+\end{enumerate}
+
+Both schemes assure positive prices using M-matrix theory. Nevertheless, in presence of low volatility, both schemes arise artificial diffusion, so that\\
+the solution is deteriorated. In particular, exponentially fitted schemes introduce artificial diffusion given by $\frac{1}{2} r S \Delta S \frac{\partial^{2} V}{\partial S^{2}}$, whilst the Crank-Nicolson variant $\frac{1}{8}\left(\frac{r \Delta S}{\sigma}\right)^{2} \frac{\partial^{2} V}{\partial S^{2}}$. Here, $r$ denotes the risk free. In both cases the artificial diffusion is significant for high $r$ values. This is demonstrated in Section 4 with numerical examples including truncated call and discrete double barrier knock-out call options. An accurate solution demands for a very small spatial step $\Delta S$. As a consequence, the exponentially fitted schemes, although uniformly convergent, guarantee accurate results only under a severe spatial step restriction, loosing their peculiarity.
+
+In conclusion, we give some final remarks for successful application and advantages of nonstandard finite difference schemes.\\
+2. Exponentially Fitted Difference Schemes. Exponentially fitted schemes are stable, have good convergence properties and do not produce spurious oscillations. These schemes are implicit finite difference schemes that are characterized by a fitting factor.
+
+Let write the Black-Scholes equation (1) in a more general form:
+
+
+\begin{equation*}
+-\frac{\partial V}{\partial t}+\mu(S, t) \frac{\partial V}{\partial S}+\sigma(S, t) \frac{\partial^{2} V}{\partial S^{2}}+b(S, t) V=0 \tag{2}
+\end{equation*}
+
+
+When we set the coefficients in front of the derivatives by $\sigma(S, t)=\frac{1}{2} \sigma^{2} S^{2}$, $\mu(S, t)=r S, b(S, t)=-r$, we obtain again the original Black-Scholes equation.
+
+Now, let consider the operator $L$ defined by:
+
+$$
+L V \equiv-\frac{\partial V}{\partial t}+\mu(S, t) \frac{\partial V}{\partial S}+\sigma(S, t) \frac{\partial^{2} V}{\partial S^{2}}+b(S, t) V
+$$
+
+We replace the derivatives in $L V$ and we define the fitted operator $L_{k}^{h}$ by
+
+$$
+L_{k}^{h} U_{j}^{n} \equiv-\frac{U_{j}^{n+1}-U_{j}^{n}}{k}+\mu_{j}^{n+1} \frac{U_{j+1}^{n+1}-U_{j-1}^{n+1}}{2 h}+\rho_{j}^{n+1} \frac{\delta_{x}^{2} U_{j}^{n+1}}{h^{2}}+b_{j}^{n+1} U_{j}^{n+1}
+$$
+
+where $h$ and $k$ are fixed space and time step.\\
+The fitting factor $\rho$ defined by Duffy is:
+
+
+\begin{equation*}
+\rho_{j}^{n+1} \equiv \frac{\mu_{j}^{n+1} h}{2} \operatorname{coth} \frac{\mu_{j}^{n+1} h}{2 \sigma_{j}^{n+1}} \tag{3}
+\end{equation*}
+
+
+This factor is identically equal to 1 in the centred difference scheme. The corresponding finite difference equation is
+
+
+\begin{equation*}
+A U^{n+1}=U^{n} \tag{4}
+\end{equation*}
+
+
+where $A$ is the following iteration matrix:
+
+$$
+A=\left[a_{i, j}\right]=\operatorname{tridiag}\left\{\left(-\frac{\rho_{j}^{n}}{h^{2}}+\frac{\mu_{j}^{n}}{2 h}\right) k ;\left(\frac{2 \rho_{j}^{n}}{h^{2}}-b_{j}^{n}+\frac{1}{k}\right) k ;-\left(\frac{\rho_{j}^{n}}{h^{2}}+\frac{\mu_{j}^{n}}{2 h}\right) k\right\}
+$$
+
+with $a_{i, i+1}<0, a_{i+1, i}<0$ and $a_{i, i}>0$. Then the iteration matrix $A$ is an irreducible diagonally dominant tridiagonal $M$-matrix (see Ortega, 6.2.3, p. 104 and 6.2.17, p. 110, [5]). Then it follows $A^{-1}>0$. From $A$ being diagonally dominant it follows (Windisch, [9])
+
+
+\begin{equation*}
+\left\|A^{-1}\right\|_{\infty} \leq \frac{1}{1-k b}=\frac{1}{1+k r}<1 \tag{5}
+\end{equation*}
+
+
+The positivity of the numerical solution follows from the induction
+
+$$
+U^{n}=A^{-1} U^{n-1}=\left(A^{-1}\right)\left(A^{-1} U^{n-2}\right)=\cdots=\left(A^{-1}\right)^{n} U^{0}>0
+$$
+
+Using the property (5) for the norm $\left\|A^{-1}\right\|_{\infty}$ we verify that the scheme satisfies the discrete maximum principle
+
+$$
+\left\|U^{n+1}\right\|_{\infty}=\left\|A^{-1} U^{n}\right\|_{\infty}=\left\|A^{-1}\right\|_{\infty}\left\|U^{n}\right\|_{\infty} \leq 1 .\left\|U^{n}\right\|_{\infty} \leq\left\|U^{n}\right\|_{\infty}
+$$
+
+Moreover, if $V(S, t)$ and $U_{j}^{n}$ are the analytical and discrete solution of equation (1) it is true the following result
+
+
+\begin{equation*}
+\left|V\left(S_{j}, t_{n}\right)-U_{j}^{n}\right| \leq c(h+k) \tag{6}
+\end{equation*}
+
+
+where $c$ is a constant that is independent of $h, k$ and $\sigma$. This result shows that convergence is assured regardless of the size of $\sigma(S, t)$.
+
+Thus, advantages of the fitted scheme with fitting factor (3) are:
+
+\begin{itemize}
+  \item It is uniformly stable for all values of $h, k$ and $\sigma$.
+  \item It is oscillation-free.
+\end{itemize}
+
+Another advantage the scheme is that it is a powerful scheme for the Black-Scholes equation (1) in the case of pure convection/drift, i.e. when $\sigma(S, t) \rightarrow 0$
+
+When $\sigma \rightarrow 0$ we use the following formula:
+
+$$
+\lim _{\sigma \rightarrow 0} \rho=\lim _{\sigma \rightarrow 0} \frac{\mu h}{2} \operatorname{coth} \frac{\mu h}{2 \sigma}=\left\{\begin{aligned}
+\frac{\mu h}{2} & \text { if } \mu>0 \\
+-\frac{\mu h}{2} & \text { if } \mu<0
+\end{aligned}\right.
+$$
+
+Inserting these results into the scheme, gives the well known first-order implicit upwind schemes that are stable and convergent.
+
+$$
+\begin{aligned}
+& -\frac{U_{j}^{n+1}-U_{j}^{n}}{k}+\mu_{j}^{n+1} \frac{U_{j+1}^{n+1}-U_{j}^{n+1}}{2 h}+b_{j}^{n+1} U_{j}^{n+1}=0, \text { for } \mu>0 \\
+& -\frac{U_{j}^{n+1}-U_{j}^{n}}{k}+\mu_{j}^{n+1} \frac{U_{j}^{n+1}-U_{j-1}^{n+1}}{2 h}+b_{j}^{n+1} U_{j}^{n+1}=0, \text { for } \mu<0
+\end{aligned}
+$$
+
+The latter, through a standard analysis of consistency, introduces numerical diffusion $\frac{1}{2} \mu(S, t) h \frac{\partial^{2} V}{\partial S^{2}}$, so that the above up-wind scheme solves, rather that the hyperbolic equation $-\frac{\partial V}{\partial t}+\mu(S, t) \frac{\partial V}{\partial S}-b(S, t) V=0$, the parabolic one
+
+
+\begin{equation*}
+-\frac{\partial V}{\partial t}+\mu(S, t) \frac{\partial V}{\partial S}+\frac{1}{2} \mu(S, t) h \frac{\partial^{2} V}{\partial S^{2}}-b(S, t) V=0 \tag{7}
+\end{equation*}
+
+
+The numerical diffusion is significant whenever $r$ is large or $h$ is not small enough. Accurate solution can be given by implicit scheme provided $h$ is chosen small. As a consequence, such a scheme loses its peculiarity consisting in the uniformly convergence above quoted.\\[0pt]
+3. The Crank-Nicolson variant. Milev-Tagliani, [4] introduced the so called Crank-Nicolson variant as a scheme spurious oscillations free. The scheme is the classical Crank-Nicolson except for the discretization of the reaction term $-r V$ in the Black-Scholes equation. Such a term is discretized by six adjacent nodes, so that the reaction term $V\left(t+\frac{\Delta t}{2}\right)$ is replaced with
+
+
+\begin{align*}
+V\left(t+\frac{\Delta t}{2}\right)=\omega_{1}\left(U_{j-1}^{n}+U_{j+1}^{n}\right)+ & \left(\frac{1}{2}-2 \omega_{1}\right) U_{j}^{n}  \tag{8}\\
+& +\omega_{2}\left(U_{j-1}^{n+1}+U_{j+1}^{n+1}\right)+\left(\frac{1}{2}-2 \omega_{2}\right) U_{j}^{n+1}
+\end{align*}
+
+
+with $\omega_{1}$ and $\omega_{2}$ parameters to be determined. The finite difference approximation provides the difference equation
+
+$$
+P U^{n+1}=N U^{n}
+$$
+
+with $P$ and $N$ the following tridiagonal matrices:
+
+$$
+\begin{aligned}
+& P=\operatorname{tridiag}\left\{+r \omega_{2}+\frac{r}{4} \frac{S_{j}}{\Delta S}-\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2} ; \frac{1}{\Delta t}+\frac{1}{2}\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}+r\left(\frac{1}{2}-2 \omega_{2}\right) ;\right. \\
+& \left.+r \omega_{2}-\frac{r}{4} \frac{S_{j}}{\Delta S}-\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2}\right\} \\
+& N=\operatorname{tridiag}\left\{-r \omega_{1}-\frac{r}{4} \frac{S_{j}}{\Delta S}+\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2} ; \frac{1}{\Delta t}-\frac{1}{2}\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}-r\left(\frac{1}{2}-2 \omega_{1}\right) ;\right. \\
+& \left.-r \omega_{1}+\frac{r}{4} \frac{S_{j}}{\Delta S}+\left(\frac{\sigma}{2} \frac{S_{j}}{\Delta S}\right)^{2}\right\}
+\end{aligned}
+$$
+
+The parameters $\omega_{1}$ and $\omega_{2}$ are chosen according to the following criteria:
+
+\begin{itemize}
+  \item $P$ is irreducibly diagonally dominant and thus $P$ is an M-matrix, so that $P^{-1}>0$;
+  \item $N$ has positive entries.
+\end{itemize}
+
+The above requirements are fulfilled if
+
+
+\begin{equation*}
+\omega_{1}=\omega_{2}=-\frac{r}{16 \sigma^{2}} \quad \text { and } \quad \Delta t<\frac{1}{r\left(\frac{1}{2}-2 \omega_{1}\right)+\frac{1}{2}(\sigma M)^{2}} \tag{9}
+\end{equation*}
+
+
+where $M$ denotes the number of nodes in $S$-direction.\\
+By combining $N \geq 0$ and $P^{-1}>0$ then the numerical solution $U^{n+1}= P^{-1} N U^{n}=\left(P^{-1} N\right)^{n} U^{0}$ is positive, since $U^{0} \geq 0$. Then, under (9) the scheme is positivity-preserving. Under condition (9) the scheme satisfies the discrete maximum principle. Indeed by combining the norms $\|N\|_{\infty}=\frac{1}{\Delta t}-\frac{r}{2}$ and $\left\|P^{-1}\right\|_{\infty} \leq\left(\frac{1}{\Delta t}+\frac{r}{2}\right)^{-1}$, (see Windisch, 1989, [9]), then we have
+
+$$
+\begin{aligned}
+\left\|U^{n+1}\right\|_{\infty}=\|\left(P^{-1} N\right) & U^{n} \|_{\infty} \\
+& =\left\|P^{-1}\right\|_{\infty}\|N\|_{\infty}\left\|U^{n}\right\|_{\infty} \leq \frac{\frac{1}{\Delta t}-\frac{r}{2}}{\frac{1}{\Delta t}+\frac{r}{2}}\left\|U^{n}\right\|_{\infty} \leq\left\|U^{n}\right\|_{\infty}
+\end{aligned}
+$$
+
+The scheme has a discretization error $O\left(\Delta S^{2}, \Delta t^{2}\right)$. When $\sigma$ is small the artificial diffusion is due mainly to the term coming from the discretization of the term\\
+$-r V$. Indeed, from a standard analysis of consistency, the artificial diffusion amounts to $\frac{1}{8}\left(\frac{r}{\sigma} \Delta S\right)^{2} \frac{\partial^{2} V}{\partial S^{2}}$, so that we are led to solve the diffusion equation
+
+
+\begin{equation*}
+-\frac{\partial V}{\partial t}+r S \frac{\partial V}{\partial S}+\frac{1}{8}\left(\frac{r}{\sigma} \Delta S\right)^{2} \frac{\partial^{2} V}{\partial S^{2}}-r V=0 \tag{10}
+\end{equation*}
+
+
+When $\sigma S \rightarrow 0$ the scheme, even if second order accurate, requires a very small $\Delta S$, equivalently the term $\frac{1}{8}\left(\frac{r}{\sigma} \Delta S\right)^{2}$ has to become insignificant, and then from (9) small $\Delta t \sim 8\left(\frac{\sigma}{r}\right)^{2}$. Then the comparison between the two above schemes is led to compare the two terms $\frac{1}{2} r S \Delta S \frac{\partial^{2} V}{\partial S^{2}}$ and $\frac{1}{8}\left(\frac{r}{\sigma} \Delta S\right)^{2} \frac{\partial^{2} V}{\partial S^{2}}$ respectively.\\
+4. Numerical results. In this section classical and nonstandard finite difference schemes are applied and compared through numerical experiments involving options having both discontinuous payoff and low volatility. We make the following test with the Crank-Nicolson scheme, standard fully implicit scheme, the implicit exponentially fitted scheme of Duffy and the Crank-Nicolson variant scheme:\\
+Test: Truncated call and discrete barrier options are explored when $\sigma^{2} \ll r$ :
+
+\begin{enumerate}
+  \item The Crank-Nicolson scheme produces undesired spurious oscillations in the numerical solution for every choice of steps $\Delta S$ and $\Delta t$, see Fig. 1. The same is observed for the standard fully implicit scheme, see Fig. 2.
+  \item Exponentially fitted schemes of Duffy arise numerical diffusion $\frac{1}{2} r S \Delta S$ which depends on $r, S$. Thus, we make test for:
+\end{enumerate}
+
+$$
+r= \begin{cases}0.01 & \text { i.e. } r \text { is small } \\ 0.5 & \text { i.e. } r \text { is large }\end{cases}
+$$
+
+\begin{enumerate}
+  \setcounter{enumi}{2}
+  \item Crank-Nicolson variant scheme arises numerical diffusion $\frac{1}{8}\left(\frac{r}{\sigma} \Delta S\right)^{2}$ which depends on $r, \sigma$ and $S$. Thus, we make test for:
+\end{enumerate}
+
+$$
+r= \begin{cases}0.01 & \text { i.e. } r \text { is small } \\ 0.5 & \text { i.e. } r \text { is large }\end{cases}
+$$
+
+\begin{enumerate}
+  \setcounter{enumi}{3}
+  \item We will demonstrate that the numerical diffusion introduced by the nonstandard exponential scheme of Duffy and the Crank Nicolson variant one can be diminished by an appropriate choice of the grid steps, see Fig. 5.
+\end{enumerate}
+
+Formally, we have divided option with a discontinuous payoff in two classes:
+
+\begin{enumerate}
+  \item Options with continuous monitoring, i.e. at any instant, but having themselves discontinuous payoff such as digital options, truncated options, ect.
+  \item Options with discrete monitoring, due to the fact that one trading year is considered to consist of 250 working days and a week of 5 days. ${ }^{1}$
+\end{enumerate}
+
+Thus, we explore one example of the two classes, i.e. a truncated call option and a discrete double knock-out call option. Here are the two definitions:
+
+Definition 4.1. A truncated payoff call option has payoff that is obtained by truncating the payoff of a vanilla call as follows:
+
+$$
+f[S(T)]= \begin{cases}S(T)-K & \text { if } S(T) \in[K, U], \text { and } \\ 0 & \text { otherwise }\end{cases}
+$$
+
+The stock price $U$ acts as a barrier, canceling the option if $S(T)>U$. In this case, the option is canceled only if the barrier is crossed at maturity. Nothing happens if the barrier is crossed before the maturity.
+
+Definition 4.2. A discrete double barrier knock-out call option is an option with a payoff condition equal to $\max (S-K, 0)$ which expires worthless if before the maturity the asset price has fallen outside the barrier corridor $[L, U]$ at the prefixed monitoring dates: at these dates the option becomes zero if the asset falls out of the corridor. If one of the barriers is touched by the asset price at the prefixed dates then the option is canceled, i.e. it becomes zero, but the holder may be compensated by a rebate payment.
+
+Example 4.1. Let price a truncated call option defined in Definition 4.1 with parameters $r=0.05, \sigma=0.001, T=5 / 12, U=70$ and $K=50$.
+
+In this example we will demonstrate how the financial provisions of the contract can affect strongly the reliability of the numerical solution by reflecting the terminal conditions of the respective Black-Scholes differential equation (1) for the particular derivative. We have chosen to valuate a truncated payoff call option because the payoff function is a slight variation of the payoff function of the standard call option, i.e. the truncated call option is canceled only if the barrier is crossed at maturity. Then probably the standard finite differences schemes that are most frequently used in Finance such as the Crank-Nicolson scheme or
+
+\footnotetext{${ }^{1}$ Thus, for one year $T=1$ the application of barriers occurs with a time increment of 0.004 daily and 0.02 weekly and we have respectively 250 and 50 monitoring dates.
+}\begin{figure}[h]
+\begin{center}
+  \includegraphics[alt={},max width=\textwidth]{2836c898-f95d-4d45-943f-f7d6437941ae-30_545_659_350_544}
+\captionsetup{labelformat=empty}
+\caption{Fig. 1. Numerical oscillations in the solution of the standard Crank-Nicolson scheme when a truncated call option is priced, $\sigma^{2} \ll r$. Parameters: $r=0.05, \sigma=0.001$,
+$$
+T=5 / 12, U=70, K=50, S_{\max }=140, \Delta S=0.05, \Delta t=0.01
+$$}
+\end{center}
+\end{figure}
+
+the fully implicit one should work successfully. However, as it is illustrated on Fig. 1, the numerical solution oscillates in neighborhood of the barrier $U=70$ where there is a discontinuity in the payoff function.
+
+Mathematically, the undesired spurious oscillations stem from the combined effect of the discontinuous payoff and low volatility. In this example the volatility takes an extremely low value, i.e. $\sigma=0.001$ and we have that $\sigma^{2} \ll r$. Thus, we confirm that the specific nature of some problems makes the direct application of the Crank-Nicolson method inefficient, see also Milev-Tagliani, [4]. Giles and Carter (2006) has demonstrated that in case of non-smooth initial data such as the Black-Scholes equation for plain vanilla options there is convergence of the numerical solution in the $L^{2}$ norm, but not in the supremum norm that is most relevant in Finance, [3].
+
+Example 4.2. Let price a discrete double barrier knock-out call option having a discontinuous payoff defined by conditions (11)-(13) and for which the strike price is 100 , the volatility is $0.1 \%$ per annum, the option has twelve months remaining to maturity, the risk-free rate is $5 \%$ per annum (compounded continuously), the lower barrier is placed at 95 , and the upper barrier is at 110 .
+
+Here are the initial and boundary conditions of the Black-Scholes partial differential equation (1) in case of a discrete double barrier knock-out call options:
+
+
+\begin{equation*}
+V(S, 0)=(S-K)^{+} 1_{[L, U]}(S) \tag{11}
+\end{equation*}
+
+
+
+\begin{equation*}
+V(S, t) \rightarrow 0 \text { as } S \rightarrow 0 \text { or } S \rightarrow \infty \tag{12}
+\end{equation*}
+
+
+with updating of the initial condition at the monitoring dates $t_{i}, i=1, \ldots, F$ :
+
+
+\begin{equation*}
+V\left(S, t_{i}\right)=V\left(S, t_{i}^{-}\right) 1_{[L, U]}(S), \quad 0=t_{0}<t_{1}<\cdots<t_{F}=T \tag{13}
+\end{equation*}
+
+
+where $\mathbf{1}_{[L, U]}(x)$ is the indicator function, i.e., $\mathbf{1}_{[L, U]}=1$ if $S \in[L, U]$ and $\mathbf{1}_{[L, u]}=0$ if $S \notin[L, U]$. Here, we do not explore options that have a rebate payment. We have seen in the previous example that the standard Crank-Nicolson scheme could not manage with options with discontinuous payoff and low volatility values. Then, very often a less accurate finite difference schemes are preferred in computational finance, i.e. $O(\Delta S, \Delta t)$, which usually in practice prevent from undesired spurious oscillations and guarantee a positive solution.
+
+For example, the let consider the standard fully implicit scheme, leading to a difference equation (here $\frac{\partial V}{\partial S}$ is discretized through a centered difference):
+
+$$
+A V^{n+1}=V^{n}, \text { where }
+$$
+
+$A=\operatorname{tridiag}\left\{-\frac{\Delta t}{2}\left[\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}-r \frac{S_{j}}{\Delta S}\right] ; 1+\Delta t\left[\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}+r\right] ;-\frac{\Delta t}{2}\left[\left(\frac{\sigma S_{j}}{\Delta S}\right)^{2}+r \frac{S_{j}}{\Delta S}\right]\right\}$\\
+If the condition $\sigma^{2}>r$ is violated then positivity of the solution is not guaranteed, while some $\lambda_{i}\left(A^{-1}\right)$ may become complex. As a consequence, spurious oscillations and negative values of $V$ can occur, as it is illustrated in Figure 2.
+
+\begin{figure}[h]
+\begin{center}
+  \includegraphics[alt={},max width=\textwidth]{2836c898-f95d-4d45-943f-f7d6437941ae-31_537_651_1500_546}
+\captionsetup{labelformat=empty}
+\caption{Fig. 2. Option pricing just before first monitoring date $t_{1}=T$. The solution is obtained using a fully implicit scheme with $\Delta S=0.025$ and $\Delta t=0.001$. Parameters: $L=90$, $K=100, U=110, r=0.05, \sigma=0.001, T=1$}
+\end{center}
+\end{figure}
+
+Then, when $\sigma^{2}<r$ (as occurs in certain regions of the grid for stochastic volatility models) the standard fully implicit scheme may fail.
+
+Under the condition $\sigma^{2} \ll r$ more suitable schemes are the discussed schemes in this article, i.e. the exponentially fitted schemes of Duffy or the Crank-Nicolson variant scheme proposed by Milev-Tagliani. Here, it is important to remember that these schemes should be applied having in mind the numerical diffusion of the solution which depends on the financial parameters $r$ and $\sigma$ as well as the applied space step $\Delta S$. This will be demonstrated in the following examples.
+
+Example 4.3. Let apply the implicit exponentially fitted finite difference scheme of Duffy that is presented in Section 2 to price a truncated payoff call option defined in Definition 4.1 for different values of the interest rate $r$ and with fixed parameters $\sigma=0.001, T=5 / 12, U=70$ and $K=50$.
+
+In this example, we demonstrate that the exponentially fitted schemes of Duffy arise numerical diffusion $\frac{1}{2} r S \Delta S$ which depends on $r, S$. Having in mind the term $\frac{1}{2} r S \Delta S$, it is obvious that the higher values the interest rate parameter $r$ takes the more the numerical diffusion should be. This is confirmed by the numerical solutions displayed on Fig. 3, where apply the scheme for a small value of $r$, i.e. $r=0.01$, and a high value of $r$, i.e. $r=0.5$, respectively on the upper and lower graphic. Similar analysis and conclusions are done in the following example when the Crank-Nicolson variant scheme is used instead.
+
+Example 4.4. Let apply the Crank-Nicolson variant scheme of MilevTagliani that is presented in Section 3 to price a truncated payoff call option
+
+\begin{figure}[h]
+\begin{center}
+\captionsetup{labelformat=empty}
+\caption{Fig. 3. Numerical diffusion of the implicit exponentially fitted scheme of Duffy for different values of $r$ when a truncated call option is priced. Parameters: $\sigma=0.001, T=5 / 12, U=70$, $K=50, S_{\max }=140, \Delta S=0.05$, $\Delta t=0.01$}
+  \includegraphics[alt={},max width=\textwidth]{2836c898-f95d-4d45-943f-f7d6437941ae-32_585_715_1606_834}
+\end{center}
+\end{figure}
+
+defined in Definition 4.1 for different values of the interest rate $r$ and with fixed parameters $\sigma=0.001, T=5 / 12, U=70$ and $K=50$.
+
+In this example we demonstrate that the Crank-Nicolson variant scheme arises numerical diffusion $\frac{1}{8}\left(\frac{r}{\sigma} \Delta S\right)^{2}$ which depends on $r, \sigma$ and $S$. Obviously, as in the previous case when we have applied the scheme of Duffy, the higher interest rate $r$ is the more the numerical solution should be deteriorated. Here, the numerical diffusion $\frac{1}{8}\left(\frac{r}{\sigma} \Delta S\right)^{2}$ depends directly also on the volatility parameter $\sigma$ and we have chosen a very low volatility value, i.e. $\sigma=0.001$. Thus, comparing the numerical solutions obtained by applying the Crank-Nicolson variant scheme for a small value of $r$, i.e. $r=0.01$ and a high value of $r$, i.e. $r=0.5$, respectively the upper and lower graphic of Fig. 4, we conclude that:
+
+\begin{enumerate}
+  \item For low volatility values the numerical diffusion is more influent when the interest rate parameter $r$ is increased from $r=0.01$ to $r=0.5$.
+  \item The proposed variant of the Crank-Nicolson scheme works successfully in the case $\sigma^{2} \ll r$ when the standard Crank-Nicolson solution suffers of undesired oscillations as we have seen in example and .
+\end{enumerate}
+
+Indeed, the numerical solution in both cases $r=0.01$ and $r=0.5$ is positive and free of oscillations. It remains to be showed that the numerical diffusion of the Crank-Nicolson variant scheme could be diminished also for high values of the interest rate $r$, i.e. the second case $r=0.5$. This could be done by choosing an appropriate choice of the grid steps as in the following example.
+
+\begin{figure}[h]
+\begin{center}
+  \includegraphics[alt={},max width=\textwidth]{2836c898-f95d-4d45-943f-f7d6437941ae-33_578_706_1604_200}
+\captionsetup{labelformat=empty}
+\caption{Fig. 4. Numerical diffusion of the Crank-Nicolson variant scheme for different values of $r$ when a truncated call option is priced. Parameters: $\sigma= 0.001, T=5 / 12, U=70, K=50$, $S_{\text {max }}=140, \Delta S=0.05, \Delta t=0.01$}
+\end{center}
+\end{figure}
+
+Example 4.5. Let price a truncated call option defined in Definition 4.1 with parameters $r=0.5, \sigma=0.001, T=5 / 12, U=70$ and $K=50$.
+
+As in Example 4.4, we apply the Crank-Nicolson variant scheme but using a smaller space step $\Delta S=0.025$, i.e two time smaller than $\Delta S=0.05$. By comparing the numerical solution on Fig. 5 with those obtained for $\Delta S=0.05$ and the same time step $\Delta S=0.01$ on the lower graphic on Fig. 4, the numerical diffusion is diminished taking into account the exact analytical solution of truncated payoff call option. If again we take a smaller space and time step, i.e. for instance $\Delta S=0.01, \Delta t=0.001$, the numerical solutions of the exponential scheme of Duffy and the Crank-Nicolson variant scheme are practically indistinguishable and much more accurate. Evidently an accurate numerical solution requires a restriction on the grid steps. The same conclusions are obtained for discrete double barrier knock-out call options so that the comparison is omitted.
+
+An optimal finite difference scheme does not exist because the numerical diffusion depends on different parameters for the respective numerical scheme. In practice usually the so called characteristic diffusion time $\tau_{d}=\frac{\Delta S^{2}}{(\sigma S)^{2}}$ is used, so that whenever $\Delta t \gg \tau_{d}$ is used, then an oscillating behavior may arise, [8].\\
+5. Conclusions. In the paper is discussed how in option pricing undesired spurious oscillations could be avoided by applying finite difference schemes that are not standard in computational finance such as the traditional implicit and Crank-Nicolson scheme. The advantage of the proposed schemes is that, under severe restrictions, they give highly accurate results, guarantee smooth
+
+\begin{figure}[h]
+\begin{center}
+  \includegraphics[alt={},max width=\textwidth]{2836c898-f95d-4d45-943f-f7d6437941ae-34_465_555_1561_590}
+\captionsetup{labelformat=empty}
+\caption{Fig. 5. Numerical diffusion of the Duffy and Crank-Nicolson variant scheme for a value of $r=0.5$ when a truncated call option is priced. Parameters: $\sigma=0.001, T=5 / 12$, $U=70, K=50, S_{\text {max }}=140, \Delta S=0.025, \Delta t=0.01$}
+\end{center}
+\end{figure}
+
+numerical solution, free of undesired spurious oscillations, and manage with low volatility values. Very often these nonstandard schemes introduce a numerical diffusion that could be diminished by an appropriate choice of grid steps. Finally, an optimal method does not exist in extreme cases such as valuation of options with a discontinuous payoff and low volatility values. The choice among the presented schemes depends only on the defined aims, such as accuracy and computational speed.
+
+\section*{REFERENCES}
+[1] D. J. Duffy. A Critique of the Crank-Nicolson Scheme., Strengths and Weakness for Financial Instrument Pricing. Wilmott Magazine 4 (2004), 68-76.\\[0pt]
+[2] D. J. Duffy. Finite difference methods in financial engineering. John Wiley and Sons, Chichester UK, 2006.\\[0pt]
+[3] M. B. Giles, R. Carter. Convergence Analysis of Crank-Nicolson and Rannacher Time-marching. J. Comput. Finance 9, 4 (2006).\\[0pt]
+[4] M. Milev, A. Tagliani. Discrete monitored barrier options by finite difference schemes. Math. and Education in Math. 38 (2009), 81-89.\\[0pt]
+[5] J. M. Ortega. Matrix Theory. Plenum Press, New York, 1988.\\[0pt]
+[6] D. Pooley, K. Vetzal, P. Forsyth. Convergence Remedies For NonSmooth Payoffs in Option Pricing. J. Comput. Finance 6 (2003), 25-40.\\[0pt]
+[7] G. D. Smith. Numerical solution of partial differential equations: finite difference methods. Oxford University Press, 1985.\\[0pt]
+[8] D. Tavella, C. Randall. Pricing Financial Instruments: The Finite Difference Method. John Wiley \& Sons, New York, 2000.\\[0pt]
+[9] G. Windisch. M-matrices in Numerical Analysis. Teubner-Texte zur Mathematik, 115, Leipzig, 1989.
+
+Mariyan Milev\\
+Department of Applied Mathematics\\
+University of Venice\\
+Dorsoduro 3825/E\\
+30123 Venice, Italy\\
+e-mail: \href{mailto:mariyan.milev@unive.it}{mariyan.milev@unive.it}
+
+Aldo Tagliani\\
+Department of Computer\\
+and Management Sciences\\
+Trento University\\
+5, Str. Inama\\
+38100 Trento, Italy\\
+e-mail: \href{mailto:tagliani@unitn.it}{tagliani@unitn.it}\\
+Received May 25, 2010
+
+
+\end{document}
