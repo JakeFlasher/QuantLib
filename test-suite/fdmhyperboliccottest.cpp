@@ -134,16 +134,66 @@ BOOST_AUTO_TEST_CASE(testRegimeBoundaryValues) {
         "Testing xCothx at exact regime boundary values...");
 
     // Exactly at xSmall = 1e-6
-    // Since |x| < xSmall triggers Taylor, 1e-6 does NOT trigger (it's ==, not <)
-    // but 0.999e-6 does. Test both sides.
+    // |x| < xSmall triggers Taylor; |x| >= xSmall uses direct.
+    // Test both sides and compare to the direct formula.
     const Real vSmallMinus = xcothx(xSmall * 0.999);
-    BOOST_CHECK_CLOSE(vSmallMinus, 1.0 + (xSmall * 0.999) * (xSmall * 0.999) / 3.0, 1e-6);
+    BOOST_CHECK_CLOSE(vSmallMinus,
+        1.0 + (xSmall * 0.999) * (xSmall * 0.999) / 3.0, 1e-6);
 
-    // Exactly at xLarge = 50
-    // Since |x| > xLarge triggers asymptotic, x=50 does NOT trigger.
-    // But x=50.001 does.
+    // xCothx at exactly xSmall = 1e-6 vs direct formula x/tanh(x)
+    const Real vAtSmall = xcothx(xSmall);
+    const Real directSmall = xSmall / std::tanh(xSmall);
+    BOOST_CHECK_CLOSE(vAtSmall, directSmall, 1e-10);
+
+    // xCothx at exactly xLarge = 50 vs direct formula x/tanh(x)
+    const Real vAtLarge = xcothx(xLarge);
+    const Real directLarge = xLarge / std::tanh(xLarge);
+    BOOST_CHECK_CLOSE(vAtLarge, directLarge, 1e-10);
+
+    // Asymptotic regime: x=50.001
     const Real vLargePlus = xcothx(xLarge + 0.001);
     BOOST_CHECK_CLOSE(vLargePlus, xLarge + 0.001, 1e-8);
+}
+
+
+BOOST_AUTO_TEST_CASE(testTightBoundaryTransitions) {
+    BOOST_TEST_MESSAGE(
+        "Testing xCothx boundary transitions at 1e-10 tolerance...");
+
+    // Taylor-vs-direct at |x| = 0.999e-6 (inside Taylor regime)
+    {
+        const Real x = 0.999e-6;
+        const Real taylor = xcothx(x);
+        const Real direct = x / std::tanh(x);
+        BOOST_CHECK_CLOSE(taylor, direct, 1e-10);
+    }
+
+    // Direct-vs-Taylor continuity across xSmall boundary
+    {
+        const Real xBelow = xSmall * (1.0 - 1e-6);
+        const Real xAbove = xSmall * (1.0 + 1e-6);
+        BOOST_CHECK_CLOSE(xcothx(xBelow), xcothx(xAbove), 1e-10);
+    }
+
+    // Direct-vs-asymptotic continuity across xLarge boundary
+    {
+        const Real xBelow = xLarge - 0.001;
+        const Real xAbove = xLarge + 0.001;
+        const Real vBelow = xcothx(xBelow);
+        const Real vAbove = xcothx(xAbove);
+        // At x≈50, coth(50) ≈ 1, so x*coth(x) ≈ x.
+        // Relative difference between 49.999 and 50.001 is tiny.
+        const Real relDiff = std::fabs(vAbove - vBelow)
+            / std::max(vAbove, vBelow);
+        BOOST_CHECK_MESSAGE(relDiff < 1e-4,
+            "Asymptotic boundary discontinuity: relDiff=" << relDiff);
+    }
+
+    // Lower bound at regime boundaries: f(x) >= 1.0
+    BOOST_CHECK_GE(xcothx(xSmall), 1.0 - 1e-15);
+    BOOST_CHECK_GE(xcothx(xLarge), 1.0 - 1e-15);
+    BOOST_CHECK_GE(xcothx(xSmall * 0.999), 1.0 - 1e-15);
+    BOOST_CHECK_GE(xcothx(xLarge + 0.001), 1.0 - 1e-15);
 }
 
 
