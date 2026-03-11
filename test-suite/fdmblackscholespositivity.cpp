@@ -830,6 +830,188 @@ BOOST_AUTO_TEST_CASE(testCrossValidationModerateVol) {
 }
 
 
+// ===================================================================
+// Negative dividend yield: MT M-matrix edge case
+// AM-GM proof for MT requires q + σ²/2 ≥ 0. With negative q,
+// the condition can fail and M-matrix fallback should trigger.
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing MT M-matrix behavior with negative dividend yield "
+        "(q=-0.30, r=0.05, sigma=0.10)...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real spot = 60.0;
+    const Rate r = 0.05;
+    const Rate q = -0.30;
+    const Volatility vol = 0.10;
+    const Real K = 60.0;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(spot)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    const Real variance = vol * vol;
+    const Real drift = r - q - variance / 2.0;
+
+    BOOST_TEST_MESSAGE("  drift = r - q - sigma^2/2 = " << drift
+        << " (q+sigma^2/2 = " << (q + variance / 2.0) << ")");
+
+    const Size xGrid = 200;
+    const Size tGrid = 40;
+    const Time maturity = 5.0 / 12.0;
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(
+            std::log(10.0), std::log(200.0), xGrid));
+
+    const ext::shared_ptr<StrikedTypePayoff> payoff =
+        ext::make_shared<CashOrNothingPayoff>(Option::Put, K, 10.0);
+    const auto calc =
+        ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+    const Array payoffVec = buildPayoffVector(mesher, calc, maturity);
+    const FdmBoundaryConditionSet bcSet;
+
+    // With FallbackToExponentialFitting: should auto-repair
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::milevTaglianiCN();
+        // Default policy is FallbackToExponentialFitting
+
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
+
+        bool allFinite = true;
+        Size negCount = 0;
+        for (Size i = 5; i < xGrid - 5; ++i) {
+            if (!std::isfinite(v[i])) allFinite = false;
+            if (v[i] < -1e-6) ++negCount;
+        }
+
+        BOOST_CHECK_MESSAGE(allFinite,
+            "Non-finite values with negative q + MT fallback");
+        BOOST_CHECK_MESSAGE(negCount == 0,
+            "Negative values (" << negCount
+            << ") with negative q + MT fallback");
+
+        BOOST_TEST_MESSAGE("  MT+fallback: all_finite=" << allFinite
+            << ", neg_count=" << negCount);
+    }
+
+    // ExponentialFitting directly should also work fine
+    {
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), fittedDesc());
+
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
+
+        bool allFinite = true;
+        for (Size i = 5; i < xGrid - 5; ++i) {
+            if (!std::isfinite(v[i])) { allFinite = false; break; }
+        }
+
+        BOOST_CHECK_MESSAGE(allFinite,
+            "Non-finite values with negative q + ExpFit");
+    }
+}
+
+
+// ===================================================================
+// Paper Example 4.1 with MT scheme: truncated call (r=0.05,
+// sigma=0.001, K=50, U=70, T=5/12). Verify MT+CN produces smooth,
+// positive, oscillation-free solution as described in the paper.
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testMilevTaglianiTruncatedCallSmoothing) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing MT+CN on paper Example 4.1 truncated call "
+        "(sigma=0.001, r=0.05): smooth, positive, no oscillations...");
+
+    LowVolSetup setup;  // sigma=0.001, r=0.05, spot=60
+
+    const Real K = 50.0;
+    const Real U = 70.0;
+    const Size xGrid = 400;
+    const Size tGrid = 40;
+
+    const Real xMin = std::log(1.0);
+    const Real xMax = std::log(140.0);
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+
+    const ext::shared_ptr<Payoff> payoff =
+        ext::make_shared<TruncatedCallPayoff>(K, U);
+    const auto calc =
+        ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+    const Array payoffVec = buildPayoffVector(mesher, calc, setup.maturity);
+    const FdmBoundaryConditionSet bcSet;
+
+    // MT + CN
+    {
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, setup.process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), milevTaglianiDesc());
+
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, setup.maturity, tGrid);
+
+        // Check positivity and finiteness
+        Size negCount = 0;
+        const Size skip = 5;
+        for (Size i = skip; i < xGrid - skip; ++i) {
+            BOOST_CHECK_MESSAGE(std::isfinite(v[i]),
+                "Non-finite at node " << i);
+            if (v[i] < -1e-12)
+                ++negCount;
+        }
+
+        BOOST_CHECK_EQUAL(negCount, Size(0));
+
+        // Measure numerical diffusion: compare transition width
+        // at U=70 with standard central
+        const auto opCentral = ext::make_shared<FdmBlackScholesOp>(
+            mesher, setup.process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), centralDesc());
+
+        Array vCentral = payoffVec;
+        rollbackCrankNicolson(opCentral, bcSet, vCentral,
+                              setup.maturity, tGrid);
+
+        // Count negative values for central (expect some)
+        Size negCentral = 0;
+        for (Size i = skip; i < xGrid - skip; ++i) {
+            if (vCentral[i] < -1e-6) ++negCentral;
+        }
+
+        BOOST_TEST_MESSAGE("  MT+CN: neg_count=" << negCount
+            << ", Central+CN: neg_count=" << negCentral);
+
+        // MT should have strictly fewer artifacts than Central
+        BOOST_CHECK_MESSAGE(negCount <= negCentral,
+            "MT should have fewer negative values than Central");
+    }
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()

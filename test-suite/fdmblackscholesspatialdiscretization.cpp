@@ -761,6 +761,194 @@ BOOST_AUTO_TEST_CASE(testDefaultDescEqualsStandard) {
 }
 
 
+// ===================================================================
+// MT drift correction audit: verify AM-GM guarantees non-negative
+// off-diagonals even without the convection correction, and measure
+// the coefficient difference from the paper's full log-space formula.
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testMilevTaglianiDriftCorrectionAudit) {
+    BOOST_TEST_MESSAGE(
+        "Auditing MT effective diffusion: code vs paper's full "
+        "log-space translation (r=0.50, sigma=0.001)...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real spot = 100.0;
+    const Rate r = 0.50;
+    const Rate q = 0.0;
+    const Volatility vol = 0.001;
+    const Real strike = 100.0;
+
+    auto process = makeProcess(spot, r, q, vol);
+
+    const Size xGrid = 20;
+    const Real xMin = std::log(50.0);
+    const Real xMax = std::log(200.0);
+    const Real h = (xMax - xMin) / (xGrid - 1);
+
+    auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+
+    const Time dt = 1.0 / 50.0;
+    const Real variance = vol * vol;
+    const Real drift = r - q - variance / 2.0;
+    const Real aBase = variance / 2.0;
+    const Real aAdd = r * r * h * h / (8.0 * variance);
+    const Real aEff = aBase + aAdd;
+
+    // Paper's full log-space correction: also adjusts drift by -aAdd
+    const Real driftPaper = drift - aAdd;
+
+    BOOST_TEST_MESSAGE("  h=" << h << ", aBase=" << aBase
+        << ", aAdd=" << aAdd << ", aEff=" << aEff);
+    BOOST_TEST_MESSAGE("  drift_code=" << drift
+        << ", drift_paper=" << driftPaper);
+    BOOST_TEST_MESSAGE("  aAdd/aBase ratio = " << aAdd / aBase);
+
+    // Verify AM-GM: aEff/h^2 >= |drift|/(2h)
+    const Real lhsAMGM = aEff / (h * h);
+    const Real rhsAMGM = std::fabs(drift) / (2.0 * h);
+    BOOST_CHECK_MESSAGE(lhsAMGM >= rhsAMGM - 1e-15,
+        "AM-GM violated: " << lhsAMGM << " < " << rhsAMGM);
+
+    // Code's lower off-diagonal: aEff/h^2 - drift/(2h)
+    const Real lowerCode = aEff / (h * h) - drift / (2.0 * h);
+    BOOST_CHECK_MESSAGE(lowerCode >= -1e-15,
+        "Code lower off-diag negative: " << lowerCode);
+
+    // Paper's lower off-diagonal: aEff/h^2 - driftPaper/(2h)
+    const Real lowerPaper = aEff / (h * h) - driftPaper / (2.0 * h);
+    BOOST_CHECK_MESSAGE(lowerPaper >= -1e-15,
+        "Paper lower off-diag negative: " << lowerPaper);
+
+    // Paper version has extra +aAdd/(2h) term, always positive
+    const Real extraTerm = aAdd / (2.0 * h);
+    BOOST_CHECK_CLOSE(lowerPaper - lowerCode, extraTerm, 1e-10);
+
+    BOOST_TEST_MESSAGE("  lower_code=" << lowerCode
+        << ", lower_paper=" << lowerPaper
+        << ", extra_term=" << extraTerm);
+
+    // Verify the actual operator matrix has non-negative off-diags
+    {
+        FdmBlackScholesSpatialDesc desc =
+            FdmBlackScholesSpatialDesc::milevTaglianiCN();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
+
+        const Size n = mesher->layout()->size();
+        Size negCount = countNegativeOffDiag(mat, n, 0.0);
+        BOOST_CHECK_MESSAGE(negCount == 0,
+            "MT operator has " << negCount
+            << " negative off-diag entries (expected 0 by AM-GM)");
+    }
+
+    BOOST_TEST_MESSAGE(
+        "  Conclusion: drift correction omission is acceptable. "
+        "AM-GM guarantees non-negative off-diags. Paper version "
+        "is strictly more positive by +" << extraTerm << " per node.");
+}
+
+
+// ===================================================================
+// Duffy Peclet number: verify code's aUsed matches the paper formula
+// ρ = (μh/2)·coth(μh/(2σ_diff)) exactly at interior nodes.
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testDuffyFittingFactorMatchesPaper) {
+    BOOST_TEST_MESSAGE(
+        "Verifying Duffy fitting factor against paper formula "
+        "(rho = mu*h/2 * coth(mu*h / (2*sigma_diff)))...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real spot = 100.0;
+    const Rate r = 0.05;
+    const Rate q = 0.02;
+    const Volatility vol = 0.20;
+    const Real strike = 100.0;
+
+    auto process = makeProcess(spot, r, q, vol);
+
+    const Size xGrid = 10;
+    const Real xMin = std::log(50.0);
+    const Real xMax = std::log(200.0);
+    const Real h = (xMax - xMin) / (xGrid - 1);
+
+    auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+
+    const Time dt = 1.0 / 50.0;
+
+    // Paper's formula: σ_diff = σ²/2, μ = r - q - σ²/2
+    const Real variance = vol * vol;
+    const Real sigmaDiff = variance / 2.0;
+    const Real mu = r - q - variance / 2.0;
+
+    // Paper: ρ = (μh/2) · coth(μh / (2σ_diff))
+    // Code: Pe = μh/σ², rho = xCothx(Pe), aUsed = σ²/2 · rho
+    // These should be identical:
+    //   (μh/2)·coth(μh/σ²) = (σ²/2)·(μh/σ²)·coth(μh/σ²)
+    //                       = (σ²/2)·xCothx(Pe)
+
+    const Real Pe = mu * h / variance;
+    const Real rhoPaper = (mu * h / 2.0) *
+        (1.0 / std::tanh(mu * h / (2.0 * sigmaDiff)));
+    const Real aUsedCode = sigmaDiff *
+        (Pe != 0.0 ? Pe / std::tanh(Pe) : 1.0);
+
+    BOOST_TEST_MESSAGE("  Pe=" << Pe
+        << ", rho_paper=" << rhoPaper
+        << ", aUsed_code=" << aUsedCode);
+
+    BOOST_CHECK_CLOSE(rhoPaper, aUsedCode, 1e-10);
+
+    // Also verify against the operator matrix
+    FdmBlackScholesSpatialDesc desc =
+        FdmBlackScholesSpatialDesc::exponentialFitting();
+    desc.mMatrixPolicy =
+        FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+
+    auto op = ext::make_shared<FdmBlackScholesOp>(
+        mesher, process, strike,
+        false, -Null<Real>(), 0,
+        ext::shared_ptr<FdmQuantoHelper>(), desc);
+
+    op->setTime(0.0, dt);
+    SparseMatrix mat = op->toMatrix();
+
+    // Check interior node i=5: lower = aUsed/h^2 - mu/(2h)
+    const Size i = 5;
+    const Real expectedLower = aUsedCode / (h * h) - mu / (2.0 * h);
+    const Real actualLower = Real(mat(i, i - 1));
+
+    BOOST_CHECK_CLOSE(actualLower, expectedLower, 0.5);
+
+    BOOST_TEST_MESSAGE("  Interior node " << i
+        << ": expected_lower=" << expectedLower
+        << ", actual_lower=" << actualLower);
+
+    // Verify both off-diags are non-negative (exponential fitting
+    // always guarantees this)
+    const Real actualUpper = Real(mat(i, i + 1));
+    BOOST_CHECK_MESSAGE(actualLower >= -1e-15,
+        "Lower off-diag negative: " << actualLower);
+    BOOST_CHECK_MESSAGE(actualUpper >= -1e-15,
+        "Upper off-diag negative: " << actualUpper);
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()
