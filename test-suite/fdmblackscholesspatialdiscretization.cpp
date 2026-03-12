@@ -947,17 +947,25 @@ BOOST_AUTO_TEST_CASE(testMilevTaglianiDriftCorrectionAudit) {
     BOOST_CHECK(std::isfinite(mtCoarse) && mtCoarse > 0);
     BOOST_CHECK(std::isfinite(fullCoarse) && fullCoarse > 0);
 
-    // Report the ratio; the drift correction is an O(h^2) effect
-    // and may or may not be dominated by grid error depending on
-    // the regime. The key is that both operators converge and the
-    // difference is bounded.
-    BOOST_CHECK_MESSAGE(std::isfinite(schemeDiff),
-        "Scheme difference is not finite");
-    BOOST_CHECK_MESSAGE(schemeDiff < std::max(gridError, 1.0),
-        "Scheme diff (" << schemeDiff
-        << ") exceeds max(gridError, 1.0)");
+    // The drift correction omission is acceptable if the scheme
+    // difference is dominated by the grid convergence error.
+    const Real ratio = schemeDiff / gridError;
+    BOOST_CHECK_MESSAGE(schemeDiff <= gridError * (1.0 + 1e-10),
+        "Drift correction exceeds grid error: schemeDiff="
+        << schemeDiff << ", gridError=" << gridError
+        << ", ratio=" << ratio);
 
-    // Coefficient-level check at the midpoint node
+    // The drift correction is O(h^2), so it should shrink on
+    // finer grids. Verify the fine-grid scheme diff is smaller.
+    const Real schemeDiffFine = std::fabs(mtFine - fullFine);
+    BOOST_CHECK_MESSAGE(schemeDiffFine < schemeDiff,
+        "Fine scheme diff (" << schemeDiffFine
+        << ") should be smaller than coarse (" << schemeDiff << ")");
+
+    BOOST_TEST_MESSAGE("  Fine scheme diff: " << schemeDiffFine
+        << " (coarse: " << schemeDiff << ")");
+
+    // Coefficient-level check and M-matrix verification
     {
         const Real h = (xMax - xMin) / (xCoarse - 1);
         Real aAdd = r * r * h * h / (8.0 * variance);
@@ -984,17 +992,43 @@ BOOST_AUTO_TEST_CASE(testMilevTaglianiDriftCorrectionAudit) {
             mesher, aEff, mu - aAdd, -r);
         SparseMatrix matFull = opFull->toMatrix();
 
-        const Size i = (xCoarse - 1) / 2;
-        const Real lowerMT = Real(matMT(i, i-1));
-        const Real lowerFull = Real(matFull(i, i-1));
+        const Size n = mesher->layout()->size();
+        const Size mid = (xCoarse - 1) / 2;
+        const Real lowerMT = Real(matMT(mid, mid-1));
+        const Real lowerFull = Real(matFull(mid, mid-1));
 
-        BOOST_TEST_MESSAGE("  Coeff node " << i
+        BOOST_TEST_MESSAGE("  Coeff node " << mid
             << ": lower_MT=" << lowerMT
             << ", lower_full=" << lowerFull
             << ", diff=" << (lowerFull - lowerMT)
             << ", expected=" << driftCorr);
 
-        BOOST_CHECK_CLOSE(lowerFull - lowerMT, driftCorr, 1.0);
+        // Coefficient delta must match expected driftCorr at
+        // machine-scale tolerance (observed relative error ~1e-10)
+        BOOST_CHECK_CLOSE(lowerFull - lowerMT, driftCorr, 1e-6);
+
+        // M-matrix check: both operators must have non-negative
+        // interior off-diagonals on this audited mesh, confirming
+        // the drift correction omission preserves monotonicity.
+        Size negMT = 0, negFull = 0;
+        for (Size i = 1; i + 1 < n; ++i) {
+            if (Real(matMT(i, i-1)) < -1e-15) ++negMT;
+            if (Real(matMT(i, i+1)) < -1e-15) ++negMT;
+            if (Real(matFull(i, i-1)) < -1e-15) ++negFull;
+            if (Real(matFull(i, i+1)) < -1e-15) ++negFull;
+        }
+
+        BOOST_CHECK_EQUAL(negMT, Size(0));
+        BOOST_CHECK_EQUAL(negFull, Size(0));
+
+        BOOST_TEST_MESSAGE(
+            "  M-matrix: shipped MT neg_offdiag=" << negMT
+            << ", full translation neg_offdiag=" << negFull);
+        BOOST_TEST_MESSAGE(
+            "  Conclusion: drift correction omission preserves "
+            "M-matrix property. schemeDiff/gridError=" << ratio
+            << " < 1, confirming the omission is bounded by "
+            "grid convergence error.");
     }
 }
 
