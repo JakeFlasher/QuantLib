@@ -13,7 +13,11 @@
 #include <ql/methods/finitedifferences/operators/fdmblackscholesspatialdesc.hpp>
 #include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
 #include <ql/methods/finitedifferences/operators/fdmmatrixdiagnostic.hpp>
+#include <ql/methods/finitedifferences/operators/firstderivativeop.hpp>
 #include <ql/methods/finitedifferences/operators/modtriplebandlinearop.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
 #include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
@@ -762,123 +766,177 @@ BOOST_AUTO_TEST_CASE(testDefaultDescEqualsStandard) {
 
 
 // ===================================================================
-// MT drift correction audit: compare shipped MT operator vs
-// full log-space paper translation (with convection correction)
-// at the value level, and measure against grid-convergence error.
+// MT drift correction audit: compare shipped MT operator (diffusion
+// only) vs the paper's full log-space translation (diffusion +
+// convection correction) at the value level. Uses r=0.50,
+// sigma=0.20 on a uniform log mesh.
+//
+// The paper's full log-space translation has:
+//   diffusion = sigma^2/2 + r^2*h^2/(8*sigma^2) = aEff
+//   drift     = mu - r^2*h^2/(8*sigma^2)         = mu - aAdd
+//   reaction  = -r
+//
+// A StandardCentral FdmBlackScholesOp with vol_eff = sqrt(2*aEff)
+// and the same r, q produces exactly these coefficients because:
+//   diffusion = vol_eff^2/2 = aEff                             (ok)
+//   drift     = r - q - vol_eff^2/2 = r - q - aEff = mu - aAdd (ok)
+//   reaction  = -r                                              (ok)
 // ===================================================================
 
 BOOST_AUTO_TEST_CASE(testMilevTaglianiDriftCorrectionAudit) {
     BOOST_TEST_MESSAGE(
-        "Auditing MT effective diffusion: value-level comparison "
-        "of shipped code vs paper's full log-space translation...");
+        "Auditing MT: shipped operator vs paper's full log-space "
+        "translation (r=0.50, sigma=0.20, uniform log mesh)...");
 
     const Date today(28, March, 2004);
     Settings::instance().evaluationDate() = today;
 
-    const Real spot = 100.0;
+    // Use sigma=0.20 so the maxAddedDiffusionRatio cap (1e6) does
+    // not interfere. The high r=0.50 creates a significant Peclet
+    // number so the drift correction term is nontrivial.
     const Rate r = 0.50;
     const Rate q = 0.0;
     const Volatility vol = 0.20;
     const Real strike = 100.0;
-    const Time maturity = 0.5;
+    const Time maturity = 0.25;
+    const Real xMin = std::log(50.0);
+    const Real xMax = std::log(200.0);
 
-    auto process = makeProcess(spot, r, q, vol);
+    const Real variance = vol * vol;
 
+    // Helper: build payoff vector and find value at spot=100
     ext::shared_ptr<StrikedTypePayoff> payoff(
         new PlainVanillaPayoff(Option::Call, strike));
 
-    // Helper: roll back a call payoff under the shipped MT operator
-    auto solveMT = [&](Size xGrid, Size tGrid) -> Real {
-        auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
-            xGrid, process, maturity, strike);
-        auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
-        auto calculator =
-            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
-        auto conditions = ext::make_shared<FdmStepConditionComposite>(
-            std::list<std::vector<Time> >(),
-            FdmStepConditionComposite::Conditions());
+    auto solveOnGrid = [&](Size xGrid, Size tGrid,
+                           const ext::shared_ptr<GeneralizedBlackScholesProcess>& proc,
+                           const FdmBlackScholesSpatialDesc& desc) {
+        auto mesher = ext::make_shared<FdmMesherComposite>(
+            ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
 
-        FdmSolverDesc solverDesc = {
-            mesher, FdmBoundaryConditionSet(), conditions,
-            calculator, maturity, tGrid, 0 };
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, proc, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
 
-        FdmBlackScholesSpatialDesc desc =
-            FdmBlackScholesSpatialDesc::milevTaglianiCN();
-        desc.mMatrixPolicy =
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+        Array rhs(mesher->layout()->size());
+        for (const auto& iter : *mesher->layout()) {
+            const Real S = std::exp(mesher->location(iter, 0));
+            rhs[iter.index()] = (*payoff)(S);
+        }
 
-        auto solver = ext::make_shared<FdmBlackScholesSolver>(
-            Handle<GeneralizedBlackScholesProcess>(process),
-            strike, solverDesc,
-            FdmSchemeDesc::CrankNicolson(),
-            false, -Null<Real>(),
-            Handle<FdmQuantoHelper>(), desc);
+        ext::shared_ptr<FdmStepConditionComposite> noCondition;
+        FdmBackwardSolver(op, FdmBoundaryConditionSet(), noCondition,
+                          FdmSchemeDesc::CrankNicolson())
+            .rollback(rhs, maturity, 0.0, tGrid, 0);
 
-        return solver->valueAt(spot);
+        // Find nearest node to spot=100
+        const Real xTarget = std::log(100.0);
+        Size bestIdx = 0;
+        Real bestDist = 1e30;
+        for (const auto& iter : *mesher->layout()) {
+            const Real d = std::fabs(
+                mesher->location(iter, 0) - xTarget);
+            if (d < bestDist) { bestDist = d; bestIdx = iter.index(); }
+        }
+        return rhs[bestIdx];
     };
 
-    // Helper: roll back under ExponentialFitting (always correct
-    // reference; no drift-correction ambiguity)
-    auto solveExpFit = [&](Size xGrid, Size tGrid) -> Real {
-        auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
-            xGrid, process, maturity, strike);
-        auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
-        auto calculator =
-            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
-        auto conditions = ext::make_shared<FdmStepConditionComposite>(
-            std::list<std::vector<Time> >(),
-            FdmStepConditionComposite::Conditions());
+    // Shipped MT operator
+    auto processMT = makeProcess(100.0, r, q, vol);
+    FdmBlackScholesSpatialDesc descMT =
+        FdmBlackScholesSpatialDesc::milevTaglianiCN();
+    descMT.mMatrixPolicy =
+        FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
 
-        FdmSolverDesc solverDesc = {
-            mesher, FdmBoundaryConditionSet(), conditions,
-            calculator, maturity, tGrid, 0 };
-
-        FdmBlackScholesSpatialDesc desc =
-            FdmBlackScholesSpatialDesc::exponentialFitting();
-        desc.mMatrixPolicy =
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
-
-        auto solver = ext::make_shared<FdmBlackScholesSolver>(
-            Handle<GeneralizedBlackScholesProcess>(process),
-            strike, solverDesc,
-            FdmSchemeDesc::CrankNicolson(),
-            false, -Null<Real>(),
-            Handle<FdmQuantoHelper>(), desc);
-
-        return solver->valueAt(spot);
+    // Paper's full log-space translation: use StandardCentral with
+    // vol_eff = sqrt(2*aEff) where aEff = sigma^2/2 + r^2*h^2/(8*sigma^2)
+    auto makeFullTranslationProcess = [&](Size xGrid) {
+        const Real h = (xMax - xMin) / (xGrid - 1);
+        const Real aAdd = r * r * h * h / (8.0 * variance);
+        const Real aEff = variance / 2.0 + aAdd;
+        const Volatility volEff = std::sqrt(2.0 * aEff);
+        return makeProcess(100.0, r, q, volEff);
     };
 
-    // Coarse and fine grids
-    const Real mtCoarse  = solveMT(100, 50);
-    const Real mtFine    = solveMT(400, 200);
-    const Real efCoarse  = solveExpFit(100, 50);
-    const Real efFine    = solveExpFit(400, 200);
+    FdmBlackScholesSpatialDesc descStd =
+        FdmBlackScholesSpatialDesc::standard();
+
+    // Coarse grid: 50 nodes, 25 time steps
+    const Size xCoarse = 50, tCoarse = 25;
+    const Size xFine = 200, tFine = 100;
+
+    auto procFullCoarse = makeFullTranslationProcess(xCoarse);
+    auto procFullFine = makeFullTranslationProcess(xFine);
+
+    const Real mtCoarse = solveOnGrid(
+        xCoarse, tCoarse, processMT, descMT);
+    const Real mtFine = solveOnGrid(
+        xFine, tFine, processMT, descMT);
+    const Real fullCoarse = solveOnGrid(
+        xCoarse, tCoarse, procFullCoarse, descStd);
+    const Real fullFine = solveOnGrid(
+        xFine, tFine, procFullFine, descStd);
 
     const Real gridError = std::fabs(mtCoarse - mtFine);
-    const Real schemeDiff = std::fabs(mtCoarse - efCoarse);
+    const Real schemeDiff = std::fabs(mtCoarse - fullCoarse);
 
     BOOST_TEST_MESSAGE("  MT coarse=" << mtCoarse
         << ", MT fine=" << mtFine);
-    BOOST_TEST_MESSAGE("  ExpFit coarse=" << efCoarse
-        << ", ExpFit fine=" << efFine);
+    BOOST_TEST_MESSAGE("  Full coarse=" << fullCoarse
+        << ", Full fine=" << fullFine);
     BOOST_TEST_MESSAGE("  Grid convergence error (MT): " << gridError);
-    BOOST_TEST_MESSAGE("  MT vs ExpFit diff (coarse): " << schemeDiff);
+    BOOST_TEST_MESSAGE("  MT vs full-translation diff (coarse): "
+        << schemeDiff);
 
-    // Both schemes should produce finite positive values
+    // Both must be finite and positive
     BOOST_CHECK(std::isfinite(mtCoarse) && mtCoarse > 0);
-    BOOST_CHECK(std::isfinite(mtFine) && mtFine > 0);
+    BOOST_CHECK(std::isfinite(fullCoarse) && fullCoarse > 0);
 
-    // The MT-vs-ExpFit difference on the coarse grid should be
-    // comparable to (or smaller than) the grid convergence error,
-    // confirming the drift correction omission is not significant.
-    BOOST_CHECK_MESSAGE(schemeDiff < gridError * 10.0,
-        "MT vs ExpFit difference (" << schemeDiff
-        << ") exceeds 10x grid error (" << gridError << ")");
+    // The drift correction difference should be dominated by
+    // the grid convergence error
+    BOOST_CHECK_MESSAGE(schemeDiff <= gridError,
+        "MT vs full-translation diff (" << schemeDiff
+        << ") exceeds grid error (" << gridError
+        << "); drift correction may be significant");
 
-    BOOST_TEST_MESSAGE(
-        "  Conclusion: drift correction omission does not "
-        "significantly affect pricing. Scheme diff / grid error = "
+    BOOST_TEST_MESSAGE("  schemeDiff / gridError = "
         << (gridError > 0 ? schemeDiff / gridError : 0.0));
+
+    // Also verify coefficient-level difference at an interior node
+    {
+        const Real h = (xMax - xMin) / (xCoarse - 1);
+        const Real aAdd = r * r * h * h / (8.0 * variance);
+        const Real driftCorr = aAdd / (2.0 * h);
+
+        auto mesher = ext::make_shared<FdmMesherComposite>(
+            ext::make_shared<Uniform1dMesher>(xMin, xMax, xCoarse));
+
+        auto opMT = ext::make_shared<FdmBlackScholesOp>(
+            mesher, processMT, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), descMT);
+        opMT->setTime(0.0, maturity / tCoarse);
+        SparseMatrix matMT = opMT->toMatrix();
+
+        auto opFull = ext::make_shared<FdmBlackScholesOp>(
+            mesher, procFullCoarse, strike,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), descStd);
+        opFull->setTime(0.0, maturity / tCoarse);
+        SparseMatrix matFull = opFull->toMatrix();
+
+        const Size i = xCoarse / 2;
+        const Real lowerMT = Real(matMT(i, i-1));
+        const Real lowerFull = Real(matFull(i, i-1));
+
+        BOOST_TEST_MESSAGE("  Coeff: lower_MT=" << lowerMT
+            << ", lower_full=" << lowerFull
+            << ", diff=" << (lowerFull - lowerMT)
+            << ", expected_diff=" << driftCorr);
+
+        BOOST_CHECK_CLOSE(lowerFull - lowerMT, driftCorr, 1.0);
+    }
 }
 
 

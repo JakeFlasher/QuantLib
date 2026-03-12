@@ -893,12 +893,12 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
 
     const Time dt = maturity / tGrid;
 
-    // Step 1: DiagnosticsOnly — verify M-matrix violation exists
+    // Step 1: DiagnosticsOnly on the coarse mesh — verify violation
     {
         FdmBlackScholesSpatialDesc desc =
             FdmBlackScholesSpatialDesc::milevTaglianiCN();
         desc.mMatrixPolicy =
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::DiagnosticsOnly;
 
         auto op = ext::make_shared<FdmBlackScholesOp>(
             mesher, process, K,
@@ -912,18 +912,20 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
         Size negCount = countNegativeOffDiag(mat, n, 0.0);
         BOOST_CHECK_MESSAGE(negCount > 0,
             "Expected MT M-matrix violations with negative q on "
-            "coarse grid, but found " << negCount);
+            "coarse grid under DiagnosticsOnly, found " << negCount);
 
-        BOOST_TEST_MESSAGE("  MT+None (coarse): "
+        BOOST_TEST_MESSAGE("  MT+DiagnosticsOnly (coarse): "
             << negCount << " negative off-diag entries");
     }
 
-    // Step 2: ExponentialFitting — verify zero violations
+    // Step 2: FallbackToExponentialFitting on the SAME coarse mesh —
+    // verify the repaired operator has zero negative off-diags
     {
         FdmBlackScholesSpatialDesc desc =
-            FdmBlackScholesSpatialDesc::exponentialFitting();
+            FdmBlackScholesSpatialDesc::milevTaglianiCN();
         desc.mMatrixPolicy =
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
+            FdmBlackScholesSpatialDesc::MMatrixPolicy
+                ::FallbackToExponentialFitting;
 
         auto op = ext::make_shared<FdmBlackScholesOp>(
             mesher, process, K,
@@ -937,31 +939,27 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
         Size negCount = countNegativeOffDiag(mat, n, 0.0);
         BOOST_CHECK_EQUAL(negCount, Size(0));
 
-        BOOST_TEST_MESSAGE("  ExpFit+None (coarse): "
-            << negCount << " negative off-diag entries");
+        BOOST_TEST_MESSAGE("  MT+Fallback (coarse): "
+            << negCount << " negative off-diag entries (repaired)");
     }
 
-    // Step 3: MT with FallbackToExponentialFitting — verify repair
-    // and roll back payoff to ensure finite non-negative solution
+    // Step 3: Roll back a payoff on the same coarse violating mesh
+    // using the fallback-repaired operator. Verify finite non-negative.
     {
         FdmBlackScholesSpatialDesc desc =
             FdmBlackScholesSpatialDesc::milevTaglianiCN();
-        // Default mMatrixPolicy is FallbackToExponentialFitting
-
-        const auto mesherFine = ext::make_shared<FdmMesherComposite>(
-            ext::make_shared<Uniform1dMesher>(
-                std::log(10.0), std::log(200.0), 200));
+        // default policy = FallbackToExponentialFitting
 
         const ext::shared_ptr<StrikedTypePayoff> payoff =
             ext::make_shared<CashOrNothingPayoff>(Option::Put, K, 10.0);
         const auto calc =
-            ext::make_shared<FdmLogInnerValue>(payoff, mesherFine, 0);
+            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
         const Array payoffVec =
-            buildPayoffVector(mesherFine, calc, maturity);
+            buildPayoffVector(mesher, calc, maturity);
         const FdmBoundaryConditionSet bcSet;
 
         const auto op = ext::make_shared<FdmBlackScholesOp>(
-            mesherFine, process, K,
+            mesher, process, K,
             false, -Null<Real>(), 0,
             ext::shared_ptr<FdmQuantoHelper>(), desc);
 
@@ -970,18 +968,45 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
 
         bool allOk = true;
         Size negVals = 0;
-        for (Size i = 5; i + 5 < v.size(); ++i) {
+        for (Size i = 1; i + 1 < v.size(); ++i) {
             if (!std::isfinite(v[i])) { allOk = false; break; }
             if (v[i] < -1e-6) ++negVals;
         }
 
         BOOST_CHECK_MESSAGE(allOk,
-            "Non-finite values with MT fallback on negative-q setup");
+            "Non-finite values on coarse mesh with MT fallback");
         BOOST_CHECK_MESSAGE(negVals == 0,
-            negVals << " negative values with MT fallback");
+            negVals << " negative values on coarse mesh with fallback");
 
-        BOOST_TEST_MESSAGE("  MT+fallback (fine): all_finite="
+        BOOST_TEST_MESSAGE("  Rollback on coarse mesh: all_finite="
             << allOk << ", neg=" << negVals);
+    }
+
+    // Step 4 (optional): compare against explicit ExpFit on same mesh
+    {
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::make_shared<CashOrNothingPayoff>(Option::Put, K, 10.0);
+        const auto calc =
+            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+        const Array payoffVec =
+            buildPayoffVector(mesher, calc, maturity);
+        const FdmBoundaryConditionSet bcSet;
+
+        const auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), fittedDesc());
+
+        Array v = payoffVec;
+        rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
+
+        bool allOk = true;
+        for (Size i = 1; i + 1 < v.size(); ++i) {
+            if (!std::isfinite(v[i])) { allOk = false; break; }
+        }
+
+        BOOST_CHECK_MESSAGE(allOk,
+            "Non-finite values with explicit ExpFit on coarse mesh");
     }
 }
 
