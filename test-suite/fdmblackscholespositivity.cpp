@@ -873,10 +873,8 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
         Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
 
     const Real variance = vol * vol;
-    const Real drift = r - q - variance / 2.0;
 
-    BOOST_TEST_MESSAGE("  drift=" << drift
-        << ", q+sigma^2/2=" << (q + variance / 2.0));
+    BOOST_TEST_MESSAGE("  q+sigma^2/2=" << (q + variance / 2.0));
 
     // Use a coarse grid so that h is large enough to force
     // MT lower off-diagonal negative. With xGrid=10 on
@@ -943,46 +941,8 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
             << negCount << " negative off-diag entries (repaired)");
     }
 
-    // Step 3: Roll back a payoff on the same coarse violating mesh
-    // using the fallback-repaired operator. Verify finite non-negative.
-    {
-        FdmBlackScholesSpatialDesc desc =
-            FdmBlackScholesSpatialDesc::milevTaglianiCN();
-        // default policy = FallbackToExponentialFitting
-
-        const ext::shared_ptr<StrikedTypePayoff> payoff =
-            ext::make_shared<CashOrNothingPayoff>(Option::Put, K, 10.0);
-        const auto calc =
-            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
-        const Array payoffVec =
-            buildPayoffVector(mesher, calc, maturity);
-        const FdmBoundaryConditionSet bcSet;
-
-        const auto op = ext::make_shared<FdmBlackScholesOp>(
-            mesher, process, K,
-            false, -Null<Real>(), 0,
-            ext::shared_ptr<FdmQuantoHelper>(), desc);
-
-        Array v = payoffVec;
-        rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
-
-        bool allOk = true;
-        Size negVals = 0;
-        for (Size i = 1; i + 1 < v.size(); ++i) {
-            if (!std::isfinite(v[i])) { allOk = false; break; }
-            if (v[i] < -1e-6) ++negVals;
-        }
-
-        BOOST_CHECK_MESSAGE(allOk,
-            "Non-finite values on coarse mesh with MT fallback");
-        BOOST_CHECK_MESSAGE(negVals == 0,
-            negVals << " negative values on coarse mesh with fallback");
-
-        BOOST_TEST_MESSAGE("  Rollback on coarse mesh: all_finite="
-            << allOk << ", neg=" << negVals);
-    }
-
-    // Step 4 (optional): compare against explicit ExpFit on same mesh
+    // Steps 3-4: Roll back a payoff on the same coarse violating mesh
+    // using (a) MT fallback and (b) explicit ExpFit. Verify finite/positive.
     {
         const ext::shared_ptr<StrikedTypePayoff> payoff =
             ext::make_shared<CashOrNothingPayoff>(Option::Put, K, 10.0);
@@ -992,21 +952,51 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
             buildPayoffVector(mesher, calc, maturity);
         const FdmBoundaryConditionSet bcSet;
 
-        const auto op = ext::make_shared<FdmBlackScholesOp>(
-            mesher, process, K,
-            false, -Null<Real>(), 0,
-            ext::shared_ptr<FdmQuantoHelper>(), fittedDesc());
+        // Step 3: MT with fallback
+        {
+            const auto op = ext::make_shared<FdmBlackScholesOp>(
+                mesher, process, K,
+                false, -Null<Real>(), 0,
+                ext::shared_ptr<FdmQuantoHelper>(),
+                FdmBlackScholesSpatialDesc::milevTaglianiCN());
 
-        Array v = payoffVec;
-        rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
+            Array v = payoffVec;
+            rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
 
-        bool allOk = true;
-        for (Size i = 1; i + 1 < v.size(); ++i) {
-            if (!std::isfinite(v[i])) { allOk = false; break; }
+            bool allOk = true;
+            Size negVals = 0;
+            for (Size i = 1; i + 1 < v.size(); ++i) {
+                if (!std::isfinite(v[i])) { allOk = false; break; }
+                if (v[i] < -1e-6) ++negVals;
+            }
+
+            BOOST_CHECK_MESSAGE(allOk,
+                "Non-finite values on coarse mesh with MT fallback");
+            BOOST_CHECK_MESSAGE(negVals == 0,
+                negVals << " negative values on coarse mesh with fallback");
+
+            BOOST_TEST_MESSAGE("  Rollback on coarse mesh: all_finite="
+                << allOk << ", neg=" << negVals);
         }
 
-        BOOST_CHECK_MESSAGE(allOk,
-            "Non-finite values with explicit ExpFit on coarse mesh");
+        // Step 4: explicit ExpFit on same mesh
+        {
+            const auto op = ext::make_shared<FdmBlackScholesOp>(
+                mesher, process, K,
+                false, -Null<Real>(), 0,
+                ext::shared_ptr<FdmQuantoHelper>(), fittedDesc());
+
+            Array v = payoffVec;
+            rollbackCrankNicolson(op, bcSet, v, maturity, tGrid);
+
+            bool allOk = true;
+            for (Size i = 1; i + 1 < v.size(); ++i) {
+                if (!std::isfinite(v[i])) { allOk = false; break; }
+            }
+
+            BOOST_CHECK_MESSAGE(allOk,
+                "Non-finite values with explicit ExpFit on coarse mesh");
+        }
     }
 }
 
@@ -1118,57 +1108,22 @@ BOOST_AUTO_TEST_CASE(testMilevTaglianiTruncatedCallSmoothing) {
         ++windowCount;
     }
 
-    // Measure transition width for MT near U=70
-    Real peakMT = 0.0;
-    for (Size i = 0; i < vMT.size(); ++i)
-        peakMT = std::max(peakMT, vMT[i]);
-
-    Size transWidthMT = 0;
-    {
-        Size iStart = 0, iEnd = 0;
-        bool found = false;
-        for (Size i = skip; i < xGrid - skip; ++i) {
-            const Real x = xMin + i * hMT;
-            if (x > xU - 0.5 && x < xU + 0.5) {
-                if (!found && vMT[i] > 0.5 * peakMT) {
-                    iStart = i;
-                    found = true;
-                }
-                if (found && vMT[i] < 0.01 * peakMT) {
-                    iEnd = i;
-                    break;
-                }
-            }
-        }
-        transWidthMT = (iEnd > iStart) ? iEnd - iStart : 0;
-    }
-
     BOOST_TEST_MESSAGE("  MT+CN: neg=" << negMT
         << ", Central+CN: neg=" << negCentral);
     BOOST_TEST_MESSAGE("  Window nodes near U=70: " << windowCount);
     BOOST_TEST_MESSAGE("  L_inf error vs ref (MT): " << maxErrMT);
     BOOST_TEST_MESSAGE("  L_inf error vs ref (Central): "
         << maxErrCentral);
-    BOOST_TEST_MESSAGE("  MT transition width near U=70: "
-        << transWidthMT << " nodes");
 
-    // MT should be finite/positive (already checked above).
     // L_inf error vs reference quantifies numerical diffusion:
-    // MT adds ⅛(r/σ · Δx)² diffusion, so its error is larger than
-    // Central's near discontinuities. Both should be finite.
+    // MT adds diffusion, so its error is larger than Central's near
+    // discontinuities. Both should be finite.
     BOOST_CHECK_MESSAGE(std::isfinite(maxErrMT),
         "MT L_inf error is not finite: " << maxErrMT);
     BOOST_CHECK_MESSAGE(maxErrMT > 0.0,
         "MT should have measurable numerical diffusion vs reference");
     BOOST_CHECK_MESSAGE(maxErrMT < 25.0,
         "MT L_inf error vs reference too large: " << maxErrMT);
-
-    // Transition width may be zero when MT diffusion completely
-    // smooths the discontinuity (expected at very low vol).
-    // The L_inf error is the primary diffusion metric.
-    BOOST_TEST_MESSAGE("  MT numerical diffusion quantified: "
-        "L_inf=" << maxErrMT
-        << " (Central L_inf=" << maxErrCentral << ")");
 }
 
 

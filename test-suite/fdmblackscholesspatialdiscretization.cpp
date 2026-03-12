@@ -314,68 +314,6 @@ BOOST_AUTO_TEST_CASE(testScheme2GatingFailFast) {
     BOOST_CHECK_THROW(solver->valueAt(100.0), Error);
 }
 
-BOOST_AUTO_TEST_CASE(testMMatrixDiagnosticUtility) {
-    BOOST_TEST_MESSAGE(
-        "Testing M-matrix diagnostic utility on low-vol operator...");
-
-    auto process = makeProcess(100.0, 0.05, 0.0, 0.001);
-
-    const Size xGrid = 60;
-    const Time maturity = 1.0;
-    const Real strike = 100.0;
-
-    auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
-        xGrid, process, maturity, strike);
-    auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
-
-    FdmBlackScholesSpatialDesc desc;
-    desc.scheme = FdmBlackScholesSpatialDesc::Scheme::StandardCentral;
-    desc.mMatrixPolicy = FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
-
-    auto op = ext::make_shared<FdmBlackScholesOp>(
-        mesher, process, strike,
-        false, -Null<Real>(), 0,
-        ext::shared_ptr<FdmQuantoHelper>(), desc);
-
-    const Time dt = maturity / 50.0;
-    op->setTime(0.0, dt);
-
-    // Extract mapT via toMatrix and construct ModTripleBandLinearOp
-    // We need to test the diagnostic utility directly on the assembled op.
-    // Since mapT_ is private, we instead reconstruct from the sparse matrix
-    // indirectly by building a fresh operator just for probing.
-    //
-    // Alternative approach: build a TripleBandLinearOp for the same
-    // direction/mesher, call axpyb with the same parameters, and probe it.
-    // But simpler: use the sparse matrix for sign checks (which is what
-    // the diagnostic effectively tests).
-
-    SparseMatrix mat = op->toMatrix();
-    const Size n = mesher->layout()->size();
-
-    Size negCount = countNegativeOffDiag(mat, n, 0.0);
-    BOOST_CHECK_MESSAGE(negCount > 0,
-        "Diagnostic test: expected violations for StandardCentral "
-        "with sigma=0.001, but found none");
-
-    // Now test exponential fitting — should fix violations
-    FdmBlackScholesSpatialDesc descFit =
-        FdmBlackScholesSpatialDesc::exponentialFitting();
-    descFit.mMatrixPolicy = FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
-
-    auto opFit = ext::make_shared<FdmBlackScholesOp>(
-        mesher, process, strike,
-        false, -Null<Real>(), 0,
-        ext::shared_ptr<FdmQuantoHelper>(), descFit);
-    opFit->setTime(0.0, dt);
-    SparseMatrix matFit = opFit->toMatrix();
-
-    Size negCountFit = countNegativeOffDiag(matFit, n, 0.0);
-    BOOST_CHECK_MESSAGE(negCountFit == 0,
-        "Diagnostic test: ExponentialFitting should have "
-        "zero violations, found " << negCountFit);
-}
-
 BOOST_AUTO_TEST_CASE(testScheme2WithCNScheme) {
     BOOST_TEST_MESSAGE(
         "Testing Scheme-2 assembles correctly with CN time stepping...");
@@ -464,7 +402,7 @@ BOOST_AUTO_TEST_CASE(testMMatrixSignChecksDetailed) {
             << negCountLoose << " (loose eps=1e6)");
     }
 
-    // ExponentialFitting should have zero violations
+    // ExponentialFitting should have zero violations and all finite entries
     {
         FdmBlackScholesSpatialDesc desc =
             FdmBlackScholesSpatialDesc::exponentialFitting();
@@ -481,6 +419,8 @@ BOOST_AUTO_TEST_CASE(testMMatrixSignChecksDetailed) {
 
         Size negCount = countNegativeOffDiag(mat, n, 0.0);
         BOOST_CHECK_EQUAL(negCount, Size(0));
+        BOOST_CHECK_MESSAGE(allFinite(mat, n),
+            "ExponentialFitting operator should have all finite entries");
     }
 
     // MilevTagliani should also have zero violations
@@ -500,25 +440,6 @@ BOOST_AUTO_TEST_CASE(testMMatrixSignChecksDetailed) {
 
         Size negCount = countNegativeOffDiag(mat, n, 0.0);
         BOOST_CHECK_EQUAL(negCount, Size(0));
-    }
-
-    // Matrix finiteness check
-    {
-        FdmBlackScholesSpatialDesc desc =
-            FdmBlackScholesSpatialDesc::exponentialFitting();
-        desc.mMatrixPolicy =
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
-
-        auto op = ext::make_shared<FdmBlackScholesOp>(
-            mesher, process, strike,
-            false, -Null<Real>(), 0,
-            ext::shared_ptr<FdmQuantoHelper>(), desc);
-
-        op->setTime(0.0, dt);
-        SparseMatrix mat = op->toMatrix();
-
-        BOOST_CHECK_MESSAGE(allFinite(mat, n),
-            "ExponentialFitting operator should have all finite entries");
     }
 }
 
