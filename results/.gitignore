@@ -1,0 +1,6 @@
+# Generated data and figures (reproducible via reproduce.sh)
+data/*.csv
+figures/*.pdf
+
+# CMake build directory
+build/
