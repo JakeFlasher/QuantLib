@@ -582,76 +582,54 @@ void runBenchmark(const std::string& dataDir) {
                         Scheme::MilevTaglianiCNEffectiveDiffusion};
 
     Size grids[] = {50, 100, 200, 400, 800, 1600};
-    const Size nRuns = 5;
+    // No wall-clock timing — use deterministic cost proxy (xGrid*tGrid)
 
     ext::shared_ptr<StrikedTypePayoff> payoff(
         new PlainVanillaPayoff(Option::Call, K));
 
-    // One CSV per scheme
+    // One CSV per scheme.  Use mMatrixPolicy=None for benchmark so
+    // scheme == effective_scheme (no ambiguous fallback provenance).
     for (Size si = 0; si < 3; ++si) {
         std::string schName = schemeName(schemes[si]);
 
-        // With FallbackToExponentialFitting, the effective scheme may differ
-        // from the requested scheme (StandardCentral falls back to ExpFit
-        // at nodes where M-matrix is violated).
-        std::string effectiveScheme = schName;
-        if (schemes[si] == Scheme::StandardCentral)
-            effectiveScheme = "StandardCentral_with_fallback";
-
         CsvWriter csv(dataDir + "/benchmark_" + schName + ".csv");
-        writeStandardMeta(csv, schName, effectiveScheme,
+        writeStandardMeta(csv, schName, schName,
                           Size(0), Size(0), r, q, vol, K, T,
-                          "FallbackToExponentialFitting",
-                          "FdmBlackScholesMesher");
+                          "None", "FdmBlackScholesMesher");
         csv.meta("spot", spot);
         csv.meta("reference_price", refPrice);
-        csv.meta("num_runs", nRuns);
-        csv.meta("timing_note", "wall-clock minimum across runs (ms)");
-        csv.header("xGrid", "min_time_ms", "price", "error");
+        csv.meta("cost_note", "relative_cost = xGrid * tGrid (deterministic proxy for runtime)");
+        csv.header("xGrid", "tGrid", "relative_cost", "price", "error");
 
         for (Size xGrid : grids) {
             Size tGrid = 4 * xGrid;
 
-            auto desc = descForScheme(schemes[si],
-                FdmBlackScholesSpatialDesc::MMatrixPolicy::FallbackToExponentialFitting);
+            auto desc = descForScheme(schemes[si]);
 
-            std::vector<double> timings;
-            Real price = 0.0;
+            auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
+                xGrid, process, T, K);
+            auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
+            auto calc = ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+            auto conditions = ext::make_shared<FdmStepConditionComposite>(
+                std::list<std::vector<Time>>(),
+                FdmStepConditionComposite::Conditions());
 
-            for (Size run = 0; run < nRuns; ++run) {
-                auto t0 = std::chrono::high_resolution_clock::now();
+            FdmSolverDesc solverDesc = {
+                mesher, FdmBoundaryConditionSet(), conditions,
+                calc, T, tGrid, 0};
 
-                auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
-                    xGrid, process, T, K);
-                auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
-                auto calc = ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
-                auto conditions = ext::make_shared<FdmStepConditionComposite>(
-                    std::list<std::vector<Time>>(),
-                    FdmStepConditionComposite::Conditions());
+            FdmBlackScholesSolver solver(
+                Handle<GeneralizedBlackScholesProcess>(process),
+                K, solverDesc,
+                FdmSchemeDesc::CrankNicolson(),
+                false, -Null<Real>(),
+                Handle<FdmQuantoHelper>(), desc);
 
-                FdmSolverDesc solverDesc = {
-                    mesher, FdmBoundaryConditionSet(), conditions,
-                    calc, T, tGrid, 0};
+            Real price = solver.valueAt(spot);
 
-                FdmBlackScholesSolver solver(
-                    Handle<GeneralizedBlackScholesProcess>(process),
-                    K, solverDesc,
-                    FdmSchemeDesc::CrankNicolson(),
-                    false, -Null<Real>(),
-                    Handle<FdmQuantoHelper>(), desc);
-
-                price = solver.valueAt(spot);
-
-                auto t1 = std::chrono::high_resolution_clock::now();
-                double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-                timings.push_back(ms);
-            }
-
-            // Use minimum time (more stable than median across runs)
-            double minTime = *std::min_element(timings.begin(), timings.end());
-
-            csv.row(xGrid, minTime, price,
-                    std::fabs(price - refPrice));
+            // Use xGrid*tGrid as a deterministic cost proxy
+            csv.row(xGrid, tGrid, Size(xGrid) * Size(tGrid),
+                    price, std::fabs(price - refPrice));
         }
     }
 
@@ -669,7 +647,8 @@ void runDiscreteBarrier(const std::string& dataDir,
                         const std::string& label,
                         Rate r, Rate q, Volatility vol,
                         Real K, Real L, Real U, Time T,
-                        Size nMonitoring, Size xGrid, Size tGrid) {
+                        Size nMonitoring, Size xGrid, Size tGrid,
+                        bool useUniformMesh = false) {
     std::cout << "  Running discrete barrier (" << label << ")..." << std::flush;
 
     auto process = makeProcess(100.0, r, q, vol);
@@ -702,15 +681,26 @@ void runDiscreteBarrier(const std::string& dataDir,
     ext::shared_ptr<StrikedTypePayoff> payoff(
         new PlainVanillaPayoff(Option::Call, K));
 
-    // Barrier mesh with concentration at K, L, U
-    std::vector<std::tuple<Real, Real, bool>> cPoints = {
-        {K, 0.1, true}, {L, 0.1, true}, {U, 0.1, true}
-    };
-    auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
-        xGrid, process, T, K,
-        Null<Real>(), Null<Real>(), 0.0001, 1.5,
-        cPoints);
-    auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
+    // At low vol, FdmBlackScholesMesher auto-domain is too narrow to include
+    // the barriers.  Use Uniform1dMesher with explicit bounds instead.
+    std::string meshType;
+    ext::shared_ptr<FdmMesherComposite> mesher;
+    if (useUniformMesh) {
+        const Real xMin = std::log(L - 15.0);  // well below L
+        const Real xMax = std::log(U + 20.0);  // well above U
+        mesher = ext::make_shared<FdmMesherComposite>(
+            ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+        meshType = "Uniform1dMesher";
+    } else {
+        std::vector<std::tuple<Real, Real, bool>> cPoints = {
+            {K, 0.1, true}, {L, 0.1, true}, {U, 0.1, true}
+        };
+        mesher = ext::make_shared<FdmMesherComposite>(
+            ext::make_shared<FdmBlackScholesMesher>(
+                xGrid, process, T, K,
+                Null<Real>(), Null<Real>(), 0.0001, 1.5, cPoints));
+        meshType = "FdmBlackScholesMesher";
+    }
 
     // Step condition: discrete double barrier knock-out
     auto barrierCondition =
@@ -731,7 +721,7 @@ void runDiscreteBarrier(const std::string& dataDir,
         CsvWriter csv(dataDir + "/barrier_" + label + "_" + schName + ".csv");
         writeStandardMeta(csv, schName, schName,
                           xGrid, tGrid, r, q, vol, K, T,
-                          "None", "FdmBlackScholesMesher");
+                          "None", meshType);
         csv.meta("lower_barrier", L);
         csv.meta("upper_barrier", U);
         csv.meta("n_monitoring", nMonitoring);
@@ -881,17 +871,26 @@ int main(int argc, char* argv[]) {
         // Fig 8: Performance benchmark
         runBenchmark(dataDir);
 
-        // Fig 3: Discrete barrier moderate-vol
+        // Fig 3: Discrete barrier moderate-vol (FdmBlackScholesMesher, 4000 nodes)
         runDiscreteBarrier(dataDir, "moderate_vol",
                            0.05, 0.0, 0.25,
                            100.0, 95.0, 110.0, 0.5,
-                           5, 2000, 50000);
+                           5, 4000, 2000,
+                           /*useUniformMesh=*/false);
 
-        // Fig 4: Discrete barrier low-vol
+        // Fine-grid barrier reference for moderate-vol (16000 nodes, ExpFit)
+        runDiscreteBarrier(dataDir, "moderate_vol_reference",
+                           0.05, 0.0, 0.25,
+                           100.0, 95.0, 110.0, 0.5,
+                           5, 16000, 8000,
+                           /*useUniformMesh=*/false);
+
+        // Fig 4: Discrete barrier low-vol (Uniform1dMesher — auto domain too narrow)
         runDiscreteBarrier(dataDir, "low_vol",
                            0.05, 0.0, 0.001,
                            100.0, 95.0, 110.0, 1.0,
-                           5, 2000, 50000);
+                           5, 800, 200,
+                           /*useUniformMesh=*/true);
 
         // MC reference: moderate-vol barrier (5M paths)
         runBarrierMC(dataDir, "moderate_vol",

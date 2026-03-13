@@ -230,6 +230,18 @@ def fig3():
         ax.plot(arr['S'][mask], arr['price'][mask],
                 color=COLORS[s], ls=STYLES[s], label=LABELS[s])
 
+    # Fine-grid reference
+    try:
+        ref_m, ref_h, ref_d = read_csv(
+            'barrier_moderate_vol_reference_ExponentialFitting.csv')
+        ref = to_float_arrays(ref_h, ref_d)
+        mask_r = (ref['S'] >= L - 1) & (ref['S'] <= U + 1)
+        ax.plot(ref['S'][mask_r], ref['price'][mask_r],
+                color=COLORS['reference'], ls=STYLES['reference'], lw=0.8,
+                label='Fine-Grid Reference (16k)')
+    except FileNotFoundError:
+        pass
+
     # MC reference
     try:
         mc_m, mc_h, mc_d = read_csv('mc_barrier_moderate_vol.csv')
@@ -246,7 +258,7 @@ def fig3():
     ax.set_ylabel(r'Option Value $V(S)$')
     ax.set_title(r'Discrete Double Barrier '
                  r'($\sigma=0.25$, $K=100$, $L=95$, $U=110$)')
-    ax.legend()
+    ax.legend(fontsize=7)
     ax.axvline(L, color='gray', ls=':', lw=0.5, alpha=0.5)
     ax.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
     save_pdf(fig, 'fig3_barrier_moderate.pdf')
@@ -388,21 +400,21 @@ def fig8():
         m, h, d = read_csv(f'benchmark_{s}.csv')
         validate_meta(f'benchmark_{s}.csv', m)
         arr = to_float_arrays(h, d)
-        ax1.loglog(arr['xGrid'], arr['min_time_ms'],
+        ax1.loglog(arr['xGrid'], arr['relative_cost'],
                    color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
                    label=LABELS[s])
-        ax2.loglog(arr['min_time_ms'], arr['error'],
+        ax2.loglog(arr['relative_cost'], arr['error'],
                    color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
                    label=LABELS[s])
 
     ax1.set_xlabel(r'Grid Size ($N_x$)')
-    ax1.set_ylabel('Min Runtime (ms)')
-    ax1.set_title('Runtime vs Grid Size')
+    ax1.set_ylabel(r'Relative Cost ($N_x \times N_t$)')
+    ax1.set_title('Cost vs Grid Size')
     ax1.legend(fontsize=7)
 
-    ax2.set_xlabel('Min Runtime (ms)')
+    ax2.set_xlabel(r'Relative Cost ($N_x \times N_t$)')
     ax2.set_ylabel(r'$|V_{\mathrm{num}} - V_{\mathrm{BS}}|$')
-    ax2.set_title('Runtime-Accuracy Tradeoff')
+    ax2.set_title('Cost-Accuracy Tradeoff')
     ax2.legend(fontsize=7)
 
     fig.suptitle('Performance Benchmark: European Call', y=1.02)

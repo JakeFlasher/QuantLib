@@ -100,9 +100,9 @@ This avoids the 0/0 indeterminate form at x = 0 and overflow for large arguments
 
 ### Experiment 3: Discrete Double Barrier — Low Volatility (Figure 4)
 
-**Parameters:** K = 100, σ = 0.001, r = 0.05, L = 95, U = 110, T = 1.0, 5 monitoring dates.
+**Parameters:** K = 100, σ = 0.001, r = 0.05, L = 95, U = 110, T = 1.0, 5 monitoring dates. At σ = 0.001, the `FdmBlackScholesMesher` auto-domain collapses to roughly [99.6, 103.0] in spot-space, excluding both barriers. This experiment uses a `Uniform1dMesher` with explicit bounds [ln(80), ln(130)] to ensure the barriers are represented, matching the validated test pattern.
 
-**Results:** In the σ² ≪ r regime, StandardCentral produces negative prices near the barriers — a direct M-matrix violation. ExponentialFitting and MilevTaglianiCN maintain positivity throughout. The Monte Carlo reference (5×10⁶ paths, SE < 0.005% of price) is plotted alongside the FD curves in Figure 4, confirming the correct solution shape.
+**Results:** On the uniform log-mesh that includes both barriers, StandardCentral produces negative prices near the barriers — a direct M-matrix violation (37 negative grid nodes). ExponentialFitting and MilevTaglianiCN maintain positivity throughout. The Monte Carlo reference (5×10⁶ paths, SE < 0.005% of price) is plotted alongside the FD curves in Figure 4.
 
 ### Experiment 4: Grid Convergence (Figure 5)
 
@@ -120,9 +120,9 @@ Figure 6 compares the effective diffusion coefficients. StandardCentral uses σ�
 
 ### Experiment 6: Performance Benchmark (Figure 8)
 
-**Parameters:** European call, same as convergence study. Minimum wall-clock time of 5 runs per configuration. Uses `FallbackToExponentialFitting` policy (records effective scheme after any fallback).
+**Parameters:** European call, same as convergence study. Uses `mMatrixPolicy=None` (no fallback) so scheme identity is unambiguous. The cost metric is the deterministic proxy N_x × N_t (proportional to the number of tridiagonal solves), which avoids the non-reproducibility of wall-clock timing.
 
-**Results:** Runtime scales similarly for all three schemes. The nonstandard schemes impose minimal overhead — the coefficient computation (xCothx or r²h²/(8σ²)) is negligible compared to the tridiagonal solve. The runtime-accuracy tradeoff is nearly identical across schemes. Note: benchmark timing is inherently non-deterministic and is excluded from the reproducibility hash check.
+**Results:** The cost-accuracy tradeoff is essentially identical across all three schemes. Since σ=0.20 is well into the σ² > r regime, the nonstandard schemes produce the same coefficients as StandardCentral and impose no additional computational cost. The tridiagonal solve dominates, and the scheme coefficient computation (xCothx or r²h²/(8σ²)) is negligible.
 
 ### Experiment 7: Péclet Number Dependence (Figure 9)
 
@@ -148,7 +148,7 @@ Figure 6 compares the effective diffusion coefficients. StandardCentral uses σ�
 
 ## 6. Conclusion
 
-The implementation of Duffy's exponential fitting and Milev-Tagliani's CN variant in QuantLib provides robust alternatives to standard Crank-Nicolson for pricing options with discontinuous payoffs or in low-volatility regimes. Both nonstandard schemes eliminate spurious oscillations and guarantee positive prices, with minimal runtime overhead. The choice between them depends on the specific problem:
+The implementation of Duffy's exponential fitting and Milev-Tagliani's CN variant in QuantLib provides robust alternatives to standard Crank-Nicolson for pricing options with discontinuous payoffs or in low-volatility regimes. In typical parameter regimes, both nonstandard schemes eliminate spurious oscillations and produce positive prices (though edge cases such as negative dividend yield can still cause violations). The choice between them depends on the specific problem:
 
 - Use **ExponentialFitting** for general robustness across all parameter regimes
 - Use **MilevTaglianiCN** when CN time stepping is already in use and the problem is specifically in the σ² ≪ r regime

@@ -29,12 +29,10 @@ cd "$SCRIPT_DIR"
 echo "[3/4] Generating figures..."
 python3 "$SCRIPT_DIR/plot_figures.py"
 
-# 4. Reproducibility self-check (excluding timing-dependent benchmark files)
+# 4. Reproducibility self-check (all artifacts, including benchmark)
 echo "[4/4] Reproducibility hash check..."
 HASH_FILE="${DATA_DIR}/.artifact_hashes"
 md5sum "$DATA_DIR"/*.csv "$FIG_DIR"/*.pdf 2>/dev/null \
-    | grep -v 'benchmark_' \
-    | grep -v 'fig8_benchmark' \
     | sort > "${HASH_FILE}.new"
 
 if [ -f "$HASH_FILE" ]; then
