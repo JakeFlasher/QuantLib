@@ -16,7 +16,7 @@ This analysis evaluates three spatial discretization schemes implemented in Quan
 
 The option price V(S,t) satisfies:
 
-$$-\frac{\partial V}{\partial t} + rS\frac{\partial V}{\partial S} + \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} - rV = 0$$
+$$-\frac{\partial V}{\partial t} + (r-q)S\frac{\partial V}{\partial S} + \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} - rV = 0$$
 
 In log-space (x = ln S), this becomes:
 
@@ -43,11 +43,11 @@ where Pe = μh/σ² is the mesh Péclet number. The fitting factor ρ satisfies 
 - ρ → 1 as Pe → 0 (recovers standard central differences)
 - ρ → |Pe| as |Pe| → ∞ (becomes first-order upwind)
 
-This guarantees non-negative off-diagonal entries (M-matrix property), producing oscillation-free, positive solutions. Convergence is uniform: |V(S_j, t_n) − U_j^n| ≤ c(h + k), independent of h, k, and σ.
+For typical parameter regimes, this produces non-negative off-diagonal entries (M-matrix property), yielding oscillation-free, positive solutions. The worst-case convergence bound is uniform: |V(S_j, t_n) − U_j^n| ≤ c(h + k), independent of h, k, and σ, though observed convergence on smooth data is typically O(h²).
 
 ### 2.4 Milev-Tagliani CN Variant
 
-The MT scheme discretizes the reaction term −rV using a 6-point stencil with parameters ω₁ = ω₂ = −r/(16σ²). This introduces artificial diffusion that restores the M-matrix property. In the code's log-space formulation, the effective diffusion is:
+The MT scheme discretizes the reaction term −rV using a 6-point stencil with parameters ω₁ = ω₂ = −r/(16σ²). In typical parameter regimes, this introduces sufficient artificial diffusion to restore the M-matrix property (though edge cases such as negative dividend yield or very coarse grids can still violate it). In the code's log-space formulation, the effective diffusion is:
 
 $$a_{\text{eff}} = \frac{\sigma^2}{2} + \frac{r^2 h^2}{8\sigma^2}$$
 
@@ -55,7 +55,7 @@ $$a_{\text{eff}} = \frac{\sigma^2}{2} + \frac{r^2 h^2}{8\sigma^2}$$
 
 ### 2.5 CN-Equivalence Requirement
 
-The MT scheme is designed for Crank-Nicolson time stepping. Using it with other time schemes (e.g., implicit Euler) may trigger the M-matrix fallback to ExponentialFitting when `mMatrixPolicy=FallbackToExponentialFitting` is set.
+The MT scheme is designed for Crank-Nicolson time stepping. The solver enforces this: any time scheme other than `CrankNicolson` (or `Douglas` with θ=0.5 in 1D) triggers a solver-level fallback to ExponentialFitting, independent of the operator's M-matrix diagnostic. With `FailFast` policy, a non-CN time scheme causes the solver to throw.
 
 ## 3. Implementation Notes
 
@@ -69,7 +69,7 @@ The paper's full S-space → log-space translation of the MT artificial diffusio
 - Diffusion addition: +r²h²/(8σ²) to the coefficient of ∂²V/∂x²
 - Drift correction: −r²h²/(8σ²) to the coefficient of ∂V/∂x
 
-The shipped code applies only the diffusion addition. The drift correction is O(h²) — the same order as the artificial diffusion itself — but testing confirms that the scheme difference (with vs. without drift correction) is dominated by the grid convergence error. On the audited mesh (xGrid=401, r=0.50, σ=0.001), the scheme difference / grid error ratio is < 1.0, and the scheme difference shrinks on finer grids.
+The shipped code applies only the diffusion addition (using `vEff = max(σ², minVariance)` and capping the added diffusion via `maxAddedDiffusionRatio`). The drift correction is O(h²) — the same order as the artificial diffusion itself — and the test `testMilevTaglianiDriftCorrectionAudit` empirically confirms that on the audited mesh (xGrid=401, r=0.50, σ=0.001) the scheme difference / grid error ratio is < 1.0, and the scheme difference shrinks on finer grids. This is an empirical audit, not a general proof.
 
 ### 3.3 Fallback Mechanism
 
@@ -90,21 +90,19 @@ This avoids the 0/0 indeterminate form at x = 0 and overflow for large arguments
 
 **Parameters:** r = 0.05, σ = 0.001, K = 50, U = 70, T = 5/12 (paper Example 4.1 from Milev-Tagliani, *Low Volatility Options*, 2010).
 
-**Results:** Figure 1 shows severe oscillations in the StandardCentral solution near the upper barrier U = 70, with negative values reaching below −5. The ExponentialFitting and MilevTaglianiCN solutions are smooth and positive throughout.
-
-Figure 2 provides a side-by-side comparison with an inset zoom near U = 70, clearly showing the three schemes' behavior at the discontinuity.
+**Results:** Figure 1 shows severe oscillations in the StandardCentral solution near the upper barrier U = 70, with negative values. A fine-grid (8× refinement) ExponentialFitting solution serves as the reference, confirming the smooth, correct solution shape. Figure 2 provides a side-by-side comparison of all three schemes with the fine-grid reference, plus an inset zoom near U = 70.
 
 ### Experiment 2: Discrete Double Barrier — Moderate Volatility (Figure 3)
 
 **Parameters:** K = 100, σ = 0.25, r = 0.05, L = 95, U = 110, T = 0.5, 5 monitoring dates (paper Example 4.1 from Milev-Tagliani, *Nonstandard FD Schemes*, 2010).
 
-**Results:** At moderate volatility (σ² > r), all three schemes produce similar, positive solutions. The Monte Carlo reference (10⁶ paths) confirms the FD results within statistical error bars. This is the regime where CN works correctly, as shown by Theorem 3.1 in the paper.
+**Results:** At moderate volatility (σ² > r), all three schemes produce nearly identical, positive solutions — confirming that the nonstandard schemes do not distort pricing when CN already works correctly (Theorem 3.1 in the paper). The Monte Carlo reference (5×10⁶ paths, SE < 0.27%) provides an independent check. On the 2000-node log-space grid, FD prices are systematically ~1.5–2% higher than MC, reflecting grid convergence error rather than scheme error (all three FD schemes agree to 14 digits). The paper's S-space results (ΔS=0.05, ~4000 nodes) show similar but not identical values, as expected given the different coordinate system. The barrier implementation uses `FdmDiscreteBarrierStepCondition` with `FdmStepConditionComposite` and a single `FdmBackwardSolver::rollback()` call, matching the validated test-suite pattern.
 
 ### Experiment 3: Discrete Double Barrier — Low Volatility (Figure 4)
 
 **Parameters:** K = 100, σ = 0.001, r = 0.05, L = 95, U = 110, T = 1.0, 5 monitoring dates.
 
-**Results:** In the σ² ≪ r regime, StandardCentral produces negative prices near the barriers — a direct M-matrix violation. ExponentialFitting and MilevTaglianiCN maintain positivity throughout. The MC reference confirms the correct solution shape.
+**Results:** In the σ² ≪ r regime, StandardCentral produces negative prices near the barriers — a direct M-matrix violation. ExponentialFitting and MilevTaglianiCN maintain positivity throughout. The Monte Carlo reference (5×10⁶ paths, SE < 0.005% of price) is plotted alongside the FD curves in Figure 4, confirming the correct solution shape.
 
 ### Experiment 4: Grid Convergence (Figure 5)
 
@@ -122,9 +120,9 @@ Figure 6 compares the effective diffusion coefficients. StandardCentral uses σ�
 
 ### Experiment 6: Performance Benchmark (Figure 8)
 
-**Parameters:** European call, same as convergence study. Median of 5 runs per configuration.
+**Parameters:** European call, same as convergence study. Minimum wall-clock time of 5 runs per configuration. Uses `FallbackToExponentialFitting` policy (records effective scheme after any fallback).
 
-**Results:** Runtime scales similarly for all three schemes. The nonstandard schemes impose minimal overhead — the coefficient computation (xCothx or r²h²/(8σ²)) is negligible compared to the tridiagonal solve. The runtime-accuracy tradeoff is nearly identical across schemes.
+**Results:** Runtime scales similarly for all three schemes. The nonstandard schemes impose minimal overhead — the coefficient computation (xCothx or r²h²/(8σ²)) is negligible compared to the tridiagonal solve. The runtime-accuracy tradeoff is nearly identical across schemes. Note: benchmark timing is inherently non-deterministic and is excluded from the reproducibility hash check.
 
 ### Experiment 7: Péclet Number Dependence (Figure 9)
 
@@ -137,14 +135,14 @@ Figure 6 compares the effective diffusion coefficients. StandardCentral uses σ�
 | Scheme | Best For | Limitations |
 |--------|----------|-------------|
 | **StandardCentral** | Moderate/high volatility, smooth payoffs | Oscillates and produces negative prices when σ² ≪ r or near sharp discontinuities |
-| **ExponentialFitting** | All regimes, particularly low volatility | First-order accuracy in space (trades accuracy for unconditional stability) |
+| **ExponentialFitting** | All regimes, particularly low volatility | Worst-case first-order accuracy; observed O(h²) convergence on smooth data. Trades guaranteed positivity for potential diffusion |
 | **MilevTaglianiCN** | Low volatility with CN time stepping | Requires CN-equivalent time scheme; more diffusive than ExponentialFitting in some regimes |
 
 ### Key Tradeoffs
 
-1. **Accuracy vs. Positivity:** StandardCentral is O(h², Δt²) but can produce non-physical negative prices. The nonstandard schemes sacrifice some accuracy (through artificial diffusion) to guarantee positivity.
+1. **Accuracy vs. Positivity:** StandardCentral is O(h², Δt²) but can produce non-physical negative prices. The nonstandard schemes sacrifice some accuracy (through artificial diffusion) to achieve positivity in typical parameter regimes (though edge cases like negative dividend yield can still cause violations).
 
-2. **Artificial Diffusion:** The ExponentialFitting scheme introduces diffusion proportional to (1/2)rSΔS, while the MT variant introduces diffusion proportional to (1/8)(rΔS/σ)². The latter grows quadratically with r/σ, making MT more diffusive in extreme low-vol regimes.
+2. **Artificial Diffusion:** The ExponentialFitting scheme introduces diffusion driven by the drift μ = r − q − σ²/2 (reducing to approximately (1/2)rSΔS only in the low-vol, q=0 limit). The MT variant introduces diffusion proportional to (1/8)(rΔS/σ)². The latter grows quadratically with r/σ, making MT more diffusive in extreme low-vol regimes.
 
 3. **Fallback Safety:** The `FallbackToExponentialFitting` policy provides a safety net when the MT scheme's M-matrix property is not guaranteed (e.g., with non-CN time schemes).
 

@@ -4,3 +4,4 @@ figures/*.pdf
 
 # CMake build directory
 build/
+__pycache__/

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """plot_figures.py — Generate 9 publication-quality PDF figures from CSV data.
 
-Reads CSV files from results/data/ and produces PDF figures in results/figures/.
+Reads per-scheme CSV files from results/data/ and produces PDF figures in
+results/figures/.  Validates CSV metadata before plotting.
+
 Requires: matplotlib, numpy.
 """
 
@@ -13,6 +15,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -34,105 +37,126 @@ plt.rcParams.update({
     'lines.linewidth': 1.2,
     'axes.grid': True,
     'grid.alpha': 0.3,
+    'pdf.fonttype': 42,       # TrueType fonts (no embedded timestamp)
+    'ps.fonttype': 42,
 })
-
-# Use LaTeX-style fonts if available
-try:
-    plt.rcParams.update({
-        'text.usetex': True,
-        'text.latex.preamble': r'\usepackage{amsmath}\usepackage{amssymb}',
-    })
-except Exception:
-    pass
 
 # Colorblind-friendly palette with distinct line styles
 COLORS = {
-    'StandardCentral': '#0072B2',       # Blue
-    'ExponentialFitting': '#D55E00',    # Vermillion
-    'MilevTaglianiCN': '#009E73',       # Green
-    'Analytical': '#000000',            # Black
-    'MC': '#CC79A7',                    # Pink
+    'StandardCentral': '#0072B2',
+    'ExponentialFitting': '#D55E00',
+    'MilevTaglianiCN': '#009E73',
+    'reference': '#000000',
+    'MC': '#CC79A7',
 }
 STYLES = {
     'StandardCentral': '-',
     'ExponentialFitting': '--',
     'MilevTaglianiCN': '-.',
-    'Analytical': ':',
+    'reference': ':',
     'MC': 'o',
 }
 LABELS = {
     'StandardCentral': 'Standard Central (CN)',
     'ExponentialFitting': 'Exponential Fitting (Duffy)',
     'MilevTaglianiCN': r'Milev-Tagliani CN Variant',
-    'Analytical': 'Analytical (Black-Scholes)',
-    'MC': 'Monte Carlo Reference',
+    'reference': 'Fine-Grid Reference',
+    'MC': r'MC ($5 \times 10^6$ paths)',
 }
 
 SCRIPT_DIR = Path(__file__).parent
 DATA_DIR = SCRIPT_DIR / 'data'
 FIG_DIR = SCRIPT_DIR / 'figures'
 
+REQUIRED_META = {'scheme', 'effective_scheme', 'xGrid', 'tGrid',
+                 'r', 'q', 'sigma', 'strike', 'maturity',
+                 'mMatrixPolicy', 'mesh'}
+
+SCHEME_ORDER = ['StandardCentral', 'ExponentialFitting', 'MilevTaglianiCN']
+
 
 def read_csv(filename):
-    """Read CSV with metadata comments. Returns (metadata_dict, header, data_rows)."""
+    """Read CSV with metadata comments.  Returns (meta, header, data_rows)."""
+    path = DATA_DIR / filename
     meta = {}
     header = None
     data = []
-    with open(DATA_DIR / filename) as f:
+    with open(path) as f:
         for line in f:
             line = line.strip()
             if line.startswith('# '):
                 parts = line[2:].split(': ', 1)
                 if len(parts) == 2:
-                    meta[parts[0]] = parts[1]
+                    meta[parts[0].strip()] = parts[1].strip()
             elif header is None:
-                header = line.split(',')
+                header = [c.strip() for c in line.split(',')]
             else:
-                data.append([float(x) if x.replace('.','',1).replace('-','',1).replace('e','',1).replace('+','',1).isdigit() else x
-                             for x in line.split(',')])
+                vals = line.split(',')
+                if len(vals) != len(header):
+                    raise ValueError(
+                        f"{filename}: row has {len(vals)} cols, "
+                        f"header has {len(header)}: {line!r}")
+                data.append(vals)
     return meta, header, data
 
 
-def to_arrays(header, data):
-    """Convert list-of-lists to dict of numpy arrays keyed by column name."""
+def validate_meta(filename, meta):
+    """Validate that all required metadata fields are present."""
+    missing = REQUIRED_META - set(meta.keys())
+    if missing:
+        raise ValueError(
+            f"{filename}: missing required metadata fields: {missing}")
+
+
+def to_float_arrays(header, data):
+    """Convert rows to dict of numpy float arrays keyed by column name."""
     arrays = {}
     for j, col in enumerate(header):
         try:
-            arrays[col] = np.array([row[j] for row in data], dtype=float)
-        except (ValueError, TypeError):
+            arrays[col] = np.array([float(row[j]) for row in data])
+        except ValueError:
             arrays[col] = [row[j] for row in data]
     return arrays
+
+
+def save_pdf(fig, name):
+    """Save figure as PDF without timestamp metadata."""
+    path = FIG_DIR / name
+    fig.savefig(path, metadata={'CreationDate': None, 'ModDate': None})
+    plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
 # Figure 1: CN spurious oscillations (truncated call)
 # ---------------------------------------------------------------------------
 
-def fig1_cn_oscillations():
-    meta, header, data = read_csv('truncated_call.csv')
-    d = to_arrays(header, data)
+def fig1():
+    sc_meta, sc_h, sc_d = read_csv('truncated_call_StandardCentral.csv')
+    validate_meta('truncated_call_StandardCentral.csv', sc_meta)
+    sc = to_float_arrays(sc_h, sc_d)
+
+    ref_meta, ref_h, ref_d = read_csv('truncated_call_reference.csv')
+    validate_meta('truncated_call_reference.csv', ref_meta)
+    ref = to_float_arrays(ref_h, ref_d)
 
     fig, ax = plt.subplots()
-    ax.plot(d['S'], d['StandardCentral'],
-            color=COLORS['StandardCentral'], ls=STYLES['StandardCentral'],
-            label=LABELS['StandardCentral'])
+    ax.plot(sc['S'], sc['price'], color=COLORS['StandardCentral'],
+            ls=STYLES['StandardCentral'], label=LABELS['StandardCentral'])
+    ax.plot(ref['S'], ref['price'], color=COLORS['reference'],
+            ls=STYLES['reference'], lw=0.8, label=LABELS['reference'])
 
-    # Fine-grid reference as "analytical" (ExpFit on same grid is smooth enough)
-    ax.plot(d['S'], d['ExponentialFitting'],
-            color=COLORS['Analytical'], ls=STYLES['Analytical'], lw=0.8,
-            label='Reference (Exponential Fitting)')
-
-    K = float(meta.get('strike', 50))
-    U = float(meta.get('upper_barrier', 70))
+    K, U = float(sc_meta['strike']), float(sc_meta['upper_barrier'])
+    mask = (sc['S'] > K) & (sc['S'] < U + 5)
+    ymax = max(sc['price'][mask]) * 1.3 if mask.any() else 25
     ax.set_xlim(K - 5, U + 10)
-    ax.set_ylim(-5, max(d['StandardCentral'][(d['S'] > K) & (d['S'] < U + 5)]) * 1.3)
+    ax.set_ylim(-5, ymax)
     ax.set_xlabel(r'Stock Price $S$')
     ax.set_ylabel(r'Option Value $V(S)$')
-    ax.set_title(r'Spurious Oscillations in Crank-Nicolson ($\sigma=0.001$, $r=0.05$)')
+    ax.set_title(r'Spurious Oscillations in Crank-Nicolson '
+                 r'($\sigma=0.001$, $r=0.05$)')
     ax.legend(loc='upper left')
     ax.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
-    fig.savefig(FIG_DIR / 'fig1_cn_oscillations.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig1_cn_oscillations.pdf')
     print('  Fig 1: CN oscillations')
 
 
@@ -140,42 +164,50 @@ def fig1_cn_oscillations():
 # Figure 2: Three-scheme comparison (truncated call)
 # ---------------------------------------------------------------------------
 
-def fig2_three_scheme_truncated():
-    meta, header, data = read_csv('truncated_call.csv')
-    d = to_arrays(header, data)
+def fig2():
+    schemes = {}
+    for s in SCHEME_ORDER:
+        m, h, d = read_csv(f'truncated_call_{s}.csv')
+        validate_meta(f'truncated_call_{s}.csv', m)
+        schemes[s] = to_float_arrays(h, d)
+
+    ref_meta, ref_h, ref_d = read_csv('truncated_call_reference.csv')
+    ref = to_float_arrays(ref_h, ref_d)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4),
                                      gridspec_kw={'width_ratios': [2, 1]})
 
-    for scheme in ['StandardCentral', 'ExponentialFitting', 'MilevTaglianiCN']:
-        ax1.plot(d['S'], d[scheme],
-                 color=COLORS[scheme], ls=STYLES[scheme],
-                 label=LABELS[scheme])
+    K = float(ref_meta['strike'])
+    U = float(ref_meta['upper_barrier'])
 
-    K = float(meta.get('strike', 50))
-    U = float(meta.get('upper_barrier', 70))
+    for s in SCHEME_ORDER:
+        ax1.plot(schemes[s]['S'], schemes[s]['price'],
+                 color=COLORS[s], ls=STYLES[s], label=LABELS[s])
+    ax1.plot(ref['S'], ref['price'], color=COLORS['reference'],
+             ls=STYLES['reference'], lw=0.8, label=LABELS['reference'])
+
     ax1.set_xlim(K - 5, U + 10)
     ax1.set_ylim(-5, 25)
     ax1.set_xlabel(r'Stock Price $S$')
     ax1.set_ylabel(r'Option Value $V(S)$')
-    ax1.set_title(r'Three-Scheme Comparison: Truncated Call')
-    ax1.legend(loc='upper left')
+    ax1.set_title('Three-Scheme Comparison: Truncated Call')
+    ax1.legend(loc='upper left', fontsize=7)
     ax1.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
 
-    # Inset/zoom near U
-    mask = (d['S'] > U - 3) & (d['S'] < U + 3)
-    for scheme in ['StandardCentral', 'ExponentialFitting', 'MilevTaglianiCN']:
-        ax2.plot(d['S'][mask], d[scheme][mask],
-                 color=COLORS[scheme], ls=STYLES[scheme],
-                 label=LABELS[scheme])
+    # Zoom near U
+    for s in SCHEME_ORDER:
+        mask = (schemes[s]['S'] > U - 3) & (schemes[s]['S'] < U + 3)
+        ax2.plot(schemes[s]['S'][mask], schemes[s]['price'][mask],
+                 color=COLORS[s], ls=STYLES[s])
+    mask_r = (ref['S'] > U - 3) & (ref['S'] < U + 3)
+    ax2.plot(ref['S'][mask_r], ref['price'][mask_r],
+             color=COLORS['reference'], ls=STYLES['reference'], lw=0.8)
     ax2.set_xlabel(r'$S$')
     ax2.set_ylabel(r'$V(S)$')
-    ax2.set_title(r'Zoom near $U=70$')
+    ax2.set_title(f'Zoom near $U={int(U)}$')
     ax2.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
-
     fig.tight_layout()
-    fig.savefig(FIG_DIR / 'fig2_three_scheme_truncated.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig2_three_scheme_truncated.pdf')
     print('  Fig 2: Three-scheme truncated call')
 
 
@@ -183,40 +215,41 @@ def fig2_three_scheme_truncated():
 # Figure 3: Moderate-vol discrete barrier
 # ---------------------------------------------------------------------------
 
-def fig3_barrier_moderate():
-    meta, header, data = read_csv('barrier_moderate_vol.csv')
-    d = to_arrays(header, data)
+def fig3():
+    fig, ax = plt.subplots()
+    first_meta = None
+    for s in SCHEME_ORDER:
+        m, h, d = read_csv(f'barrier_moderate_vol_{s}.csv')
+        validate_meta(f'barrier_moderate_vol_{s}.csv', m)
+        arr = to_float_arrays(h, d)
+        if first_meta is None:
+            first_meta = m
+        L = float(m['lower_barrier'])
+        U = float(m['upper_barrier'])
+        mask = (arr['S'] >= L - 1) & (arr['S'] <= U + 1)
+        ax.plot(arr['S'][mask], arr['price'][mask],
+                color=COLORS[s], ls=STYLES[s], label=LABELS[s])
 
     # MC reference
     try:
-        mc_meta, mc_header, mc_data = read_csv('mc_barrier_moderate_vol.csv')
-        mc = to_arrays(mc_header, mc_data)
-        has_mc = True
-    except FileNotFoundError:
-        has_mc = False
-
-    fig, ax = plt.subplots()
-    L, U = float(meta.get('lower_barrier', 95)), float(meta.get('upper_barrier', 110))
-    mask = (d['S'] >= L - 1) & (d['S'] <= U + 1)
-
-    for scheme in ['StandardCentral', 'ExponentialFitting', 'MilevTaglianiCN']:
-        ax.plot(d['S'][mask], d[scheme][mask],
-                color=COLORS[scheme], ls=STYLES[scheme],
-                label=LABELS[scheme])
-
-    if has_mc:
+        mc_m, mc_h, mc_d = read_csv('mc_barrier_moderate_vol.csv')
+        mc = to_float_arrays(mc_h, mc_d)
         ax.errorbar(mc['S0'], mc['price'], yerr=2*mc['standard_error'],
                      fmt='o', color=COLORS['MC'], ms=3, lw=0.8,
-                     capsize=2, label=r'MC ($10^6$ paths)')
+                     capsize=2, label=LABELS['MC'])
+    except FileNotFoundError:
+        pass
 
+    L = float(first_meta['lower_barrier'])
+    U = float(first_meta['upper_barrier'])
     ax.set_xlabel(r'Stock Price $S$')
     ax.set_ylabel(r'Option Value $V(S)$')
-    ax.set_title(r'Discrete Double Barrier ($\sigma=0.25$, $K=100$, $L=95$, $U=110$)')
+    ax.set_title(r'Discrete Double Barrier '
+                 r'($\sigma=0.25$, $K=100$, $L=95$, $U=110$)')
     ax.legend()
     ax.axvline(L, color='gray', ls=':', lw=0.5, alpha=0.5)
     ax.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
-    fig.savefig(FIG_DIR / 'fig3_barrier_moderate.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig3_barrier_moderate.pdf')
     print('  Fig 3: Moderate-vol barrier')
 
 
@@ -224,28 +257,42 @@ def fig3_barrier_moderate():
 # Figure 4: Low-vol discrete barrier
 # ---------------------------------------------------------------------------
 
-def fig4_barrier_lowvol():
-    meta, header, data = read_csv('barrier_low_vol.csv')
-    d = to_arrays(header, data)
-
+def fig4():
     fig, ax = plt.subplots()
-    L, U = float(meta.get('lower_barrier', 95)), float(meta.get('upper_barrier', 110))
-    mask = (d['S'] >= L - 1) & (d['S'] <= U + 1)
+    first_meta = None
+    for s in SCHEME_ORDER:
+        m, h, d = read_csv(f'barrier_low_vol_{s}.csv')
+        validate_meta(f'barrier_low_vol_{s}.csv', m)
+        arr = to_float_arrays(h, d)
+        if first_meta is None:
+            first_meta = m
+        L = float(m['lower_barrier'])
+        U = float(m['upper_barrier'])
+        mask = (arr['S'] >= L - 1) & (arr['S'] <= U + 1)
+        ax.plot(arr['S'][mask], arr['price'][mask],
+                color=COLORS[s], ls=STYLES[s], label=LABELS[s])
 
-    for scheme in ['StandardCentral', 'ExponentialFitting', 'MilevTaglianiCN']:
-        ax.plot(d['S'][mask], d[scheme][mask],
-                color=COLORS[scheme], ls=STYLES[scheme],
-                label=LABELS[scheme])
+    # MC reference (low-vol)
+    try:
+        mc_m, mc_h, mc_d = read_csv('mc_barrier_low_vol.csv')
+        mc = to_float_arrays(mc_h, mc_d)
+        ax.errorbar(mc['S0'], mc['price'], yerr=2*mc['standard_error'],
+                     fmt='o', color=COLORS['MC'], ms=3, lw=0.8,
+                     capsize=2, label=LABELS['MC'])
+    except FileNotFoundError:
+        pass
 
     ax.axhline(0, color='red', ls=':', lw=0.5, alpha=0.7)
     ax.set_xlabel(r'Stock Price $S$')
     ax.set_ylabel(r'Option Value $V(S)$')
-    ax.set_title(r'Low-Vol Discrete Barrier ($\sigma=0.001$, $\sigma^2 \ll r$)')
+    ax.set_title(r'Low-Vol Discrete Barrier '
+                 r'($\sigma=0.001$, $\sigma^2 \ll r$)')
     ax.legend()
+    L = float(first_meta['lower_barrier'])
+    U = float(first_meta['upper_barrier'])
     ax.axvline(L, color='gray', ls=':', lw=0.5, alpha=0.5)
     ax.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
-    fig.savefig(FIG_DIR / 'fig4_barrier_lowvol.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig4_barrier_lowvol.pdf')
     print('  Fig 4: Low-vol barrier')
 
 
@@ -253,28 +300,27 @@ def fig4_barrier_lowvol():
 # Figure 5: Grid convergence
 # ---------------------------------------------------------------------------
 
-def fig5_convergence():
-    meta, header, data = read_csv('grid_convergence.csv')
-    d = to_arrays(header, data)
-
+def fig5():
     fig, ax = plt.subplots()
-    for scheme in ['StandardCentral', 'ExponentialFitting', 'MilevTaglianiCN']:
-        err = d[f'err_{scheme}']
-        ax.loglog(d['xGrid'], err,
-                  color=COLORS[scheme], ls=STYLES[scheme],
-                  marker='s', ms=4,
-                  label=LABELS[scheme])
+    for s in SCHEME_ORDER:
+        m, h, d = read_csv(f'grid_convergence_{s}.csv')
+        validate_meta(f'grid_convergence_{s}.csv', m)
+        arr = to_float_arrays(h, d)
+        ax.loglog(arr['xGrid'], arr['error'],
+                  color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
+                  label=LABELS[s])
 
-    # Reference slope lines
-    x = d['xGrid']
-    ax.loglog(x, 0.5 * (x[0]/x)**2, 'k:', lw=0.5, alpha=0.5, label=r'$O(h^2)$ slope')
+    # O(h^2) reference slope
+    x = arr['xGrid']
+    y0 = arr['error'][0] if arr['error'][0] > 0 else 1e-2
+    ax.loglog(x, y0 * (x[0]/x)**2, 'k:', lw=0.5, alpha=0.5,
+              label=r'$O(h^2)$ slope')
 
     ax.set_xlabel(r'Spatial Grid Size ($N_x$)')
     ax.set_ylabel(r'$|V_{\mathrm{num}} - V_{\mathrm{BS}}|$')
     ax.set_title(r'Grid Convergence: European Call ($\sigma=0.20$)')
     ax.legend()
-    fig.savefig(FIG_DIR / 'fig5_convergence.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig5_convergence.pdf')
     print('  Fig 5: Grid convergence')
 
 
@@ -282,28 +328,21 @@ def fig5_convergence():
 # Figure 6: Effective diffusion comparison
 # ---------------------------------------------------------------------------
 
-def fig6_effective_diffusion():
-    meta, header, data = read_csv('effective_diffusion.csv')
-    d = to_arrays(header, data)
-
+def fig6():
     fig, ax = plt.subplots()
-    ax.plot(d['S'], d['aUsed_SC'],
-            color=COLORS['StandardCentral'], ls=STYLES['StandardCentral'],
-            label=LABELS['StandardCentral'])
-    ax.plot(d['S'], d['aUsed_EF'],
-            color=COLORS['ExponentialFitting'], ls=STYLES['ExponentialFitting'],
-            label=LABELS['ExponentialFitting'])
-    ax.plot(d['S'], d['aUsed_MT'],
-            color=COLORS['MilevTaglianiCN'], ls=STYLES['MilevTaglianiCN'],
-            label=LABELS['MilevTaglianiCN'])
+    for s in SCHEME_ORDER:
+        m, h, d = read_csv(f'effective_diffusion_{s}.csv')
+        validate_meta(f'effective_diffusion_{s}.csv', m)
+        arr = to_float_arrays(h, d)
+        ax.plot(arr['S'], arr['aUsed'], color=COLORS[s], ls=STYLES[s],
+                label=LABELS[s])
 
     ax.set_xlabel(r'Stock Price $S$')
-    ax.set_ylabel(r'Effective Diffusion Coefficient $a_{\mathrm{eff}}$')
-    ax.set_title(r'Artificial Diffusion: Duffy vs Milev-Tagliani ($\sigma=0.001$)')
+    ax.set_ylabel(r'Effective Diffusion $a_{\mathrm{eff}}$')
+    ax.set_title(r'Artificial Diffusion: Duffy vs MT ($\sigma=0.001$)')
     ax.legend()
     ax.set_yscale('log')
-    fig.savefig(FIG_DIR / 'fig6_effective_diffusion.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig6_effective_diffusion.pdf')
     print('  Fig 6: Effective diffusion')
 
 
@@ -311,42 +350,30 @@ def fig6_effective_diffusion():
 # Figure 7: M-matrix off-diagonal visualization
 # ---------------------------------------------------------------------------
 
-def fig7_mmatrix():
-    meta, header, data = read_csv('mmatrix_offdiag.csv')
-    d = to_arrays(header, data)
-
+def fig7():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
-    # Lower off-diagonal
-    for scheme, lo_col in [('StandardCentral', 'lower_SC'),
-                            ('ExponentialFitting', 'lower_EF'),
-                            ('MilevTaglianiCN', 'lower_MT')]:
-        ax1.plot(d['S'], d[lo_col],
-                 color=COLORS[scheme], ls=STYLES[scheme],
-                 label=LABELS[scheme])
-    ax1.axhline(0, color='red', ls=':', lw=0.8, alpha=0.7)
-    ax1.set_xlabel(r'Stock Price $S$')
-    ax1.set_ylabel(r'Lower Off-Diagonal $a_{i,i-1}$')
-    ax1.set_title('Lower Off-Diagonal Entries')
-    ax1.legend(fontsize=7)
+    for s in SCHEME_ORDER:
+        m, h, d = read_csv(f'mmatrix_offdiag_{s}.csv')
+        validate_meta(f'mmatrix_offdiag_{s}.csv', m)
+        arr = to_float_arrays(h, d)
+        ax1.plot(arr['S'], arr['lower'], color=COLORS[s], ls=STYLES[s],
+                 label=LABELS[s])
+        ax2.plot(arr['S'], arr['upper'], color=COLORS[s], ls=STYLES[s],
+                 label=LABELS[s])
 
-    # Upper off-diagonal
-    for scheme, up_col in [('StandardCentral', 'upper_SC'),
-                            ('ExponentialFitting', 'upper_EF'),
-                            ('MilevTaglianiCN', 'upper_MT')]:
-        ax2.plot(d['S'], d[up_col],
-                 color=COLORS[scheme], ls=STYLES[scheme],
-                 label=LABELS[scheme])
-    ax2.axhline(0, color='red', ls=':', lw=0.8, alpha=0.7)
-    ax2.set_xlabel(r'Stock Price $S$')
-    ax2.set_ylabel(r'Upper Off-Diagonal $a_{i,i+1}$')
-    ax2.set_title('Upper Off-Diagonal Entries')
-    ax2.legend(fontsize=7)
+    for ax, title in [(ax1, r'Lower Off-Diagonal $a_{i,i-1}$'),
+                      (ax2, r'Upper Off-Diagonal $a_{i,i+1}$')]:
+        ax.axhline(0, color='red', ls=':', lw=0.8, alpha=0.7)
+        ax.set_xlabel(r'Stock Price $S$')
+        ax.set_ylabel(title)
+        ax.set_title(title.split('$')[0].strip())
+        ax.legend(fontsize=7)
 
-    fig.suptitle(r'M-Matrix Property: Off-Diagonal Signs ($\sigma=0.001$)', y=1.02)
+    fig.suptitle(r'M-Matrix Property: Off-Diagonal Signs ($\sigma=0.001$)',
+                 y=1.02)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / 'fig7_mmatrix.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig7_mmatrix.pdf')
     print('  Fig 7: M-matrix off-diagonals')
 
 
@@ -354,47 +381,33 @@ def fig7_mmatrix():
 # Figure 8: Performance benchmark
 # ---------------------------------------------------------------------------
 
-def fig8_benchmark():
-    meta, header, data = read_csv('benchmark.csv')
-    d = to_arrays(header, data)
-
+def fig8():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
-    schemes_data = {}
-    for i, row in enumerate(data):
-        xGrid = int(row[0])
-        scheme = str(row[1]).strip()
-        time_ms = float(row[2])
-        error = float(row[4])
-        if scheme not in schemes_data:
-            schemes_data[scheme] = {'grids': [], 'times': [], 'errors': []}
-        schemes_data[scheme]['grids'].append(xGrid)
-        schemes_data[scheme]['times'].append(time_ms)
-        schemes_data[scheme]['errors'].append(error)
-
-    for scheme, sd in schemes_data.items():
-        color = COLORS.get(scheme, '#999999')
-        ls = STYLES.get(scheme, '-')
-        label = LABELS.get(scheme, scheme)
-        ax1.loglog(sd['grids'], sd['times'],
-                   color=color, ls=ls, marker='s', ms=4, label=label)
-        ax2.loglog(sd['times'], sd['errors'],
-                   color=color, ls=ls, marker='s', ms=4, label=label)
+    for s in SCHEME_ORDER:
+        m, h, d = read_csv(f'benchmark_{s}.csv')
+        validate_meta(f'benchmark_{s}.csv', m)
+        arr = to_float_arrays(h, d)
+        ax1.loglog(arr['xGrid'], arr['min_time_ms'],
+                   color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
+                   label=LABELS[s])
+        ax2.loglog(arr['min_time_ms'], arr['error'],
+                   color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
+                   label=LABELS[s])
 
     ax1.set_xlabel(r'Grid Size ($N_x$)')
-    ax1.set_ylabel('Median Runtime (ms)')
+    ax1.set_ylabel('Min Runtime (ms)')
     ax1.set_title('Runtime vs Grid Size')
     ax1.legend(fontsize=7)
 
-    ax2.set_xlabel('Median Runtime (ms)')
+    ax2.set_xlabel('Min Runtime (ms)')
     ax2.set_ylabel(r'$|V_{\mathrm{num}} - V_{\mathrm{BS}}|$')
     ax2.set_title('Runtime-Accuracy Tradeoff')
     ax2.legend(fontsize=7)
 
     fig.suptitle('Performance Benchmark: European Call', y=1.02)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / 'fig8_benchmark.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig8_benchmark.pdf')
     print('  Fig 8: Benchmark')
 
 
@@ -402,26 +415,26 @@ def fig8_benchmark():
 # Figure 9: xCothx / Peclet number
 # ---------------------------------------------------------------------------
 
-def fig9_xcothx():
-    meta, header, data = read_csv('xcothx.csv')
-    d = to_arrays(header, data)
+def fig9():
+    m, h, d = read_csv('xcothx.csv')
+    # xcothx has N/A for solver fields — skip strict validation
+    arr = to_float_arrays(h, d)
 
     fig, ax = plt.subplots()
-    ax.plot(d['Pe'], d['xCothx'], color=COLORS['ExponentialFitting'],
+    ax.plot(arr['Pe'], arr['xCothx'], color=COLORS['ExponentialFitting'],
             ls='-', lw=1.5, label=r'$x \coth(x) = \rho(Pe)$')
-    ax.plot(d['Pe'], d['abs_Pe'], color='gray', ls=':', lw=0.8,
+    ax.plot(arr['Pe'], arr['abs_Pe'], color='gray', ls=':', lw=0.8,
             label=r'$|Pe|$ (upwind limit)')
     ax.axhline(1.0, color='gray', ls='--', lw=0.5, alpha=0.5,
                label=r'$\rho=1$ (central limit)')
 
     ax.set_xlabel(r'P\'eclet Number $Pe$')
     ax.set_ylabel(r'Fitting Factor $\rho = x\coth(x)$')
-    ax.set_title(r'Duffy Fitting Factor: Regime Transition')
+    ax.set_title('Duffy Fitting Factor: Regime Transition')
     ax.legend()
     ax.set_xlim(-20, 20)
     ax.set_ylim(0, 22)
-    fig.savefig(FIG_DIR / 'fig9_xcothx.pdf')
-    plt.close(fig)
+    save_pdf(fig, 'fig9_xcothx.pdf')
     print('  Fig 9: xCothx/Peclet')
 
 
@@ -433,21 +446,20 @@ def main():
     FIG_DIR.mkdir(parents=True, exist_ok=True)
 
     if not DATA_DIR.exists():
-        print(f"Error: Data directory {DATA_DIR} not found. Run generate_data first.")
+        print(f"Error: Data directory {DATA_DIR} not found. "
+              "Run generate_data first.", file=sys.stderr)
         sys.exit(1)
 
     print("Generating figures...")
-
-    fig9_xcothx()
-    fig7_mmatrix()
-    fig6_effective_diffusion()
-    fig5_convergence()
-    fig1_cn_oscillations()
-    fig2_three_scheme_truncated()
-    fig3_barrier_moderate()
-    fig4_barrier_lowvol()
-    fig8_benchmark()
-
+    fig9()
+    fig7()
+    fig6()
+    fig5()
+    fig1()
+    fig2()
+    fig3()
+    fig4()
+    fig8()
     print(f"All 9 figures saved to {FIG_DIR}/")
 
 

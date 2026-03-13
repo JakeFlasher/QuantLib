@@ -1,7 +1,12 @@
 /* generate_data.cpp — Numerical experiments for nonstandard FD scheme analysis.
  *
  * Links against the QuantLib build via CMake find_package(QuantLib).
- * Outputs CSV files to results/data/ for consumption by plot_figures.py.
+ * Outputs CSV files to ../data/ (relative to cwd) for consumption by
+ * plot_figures.py.
+ *
+ * Compile with C++17.  Run from the build/ directory:
+ *     ./generate_data            # writes to ../data/
+ *     ./generate_data /tmp/out   # writes to /tmp/out/
  */
 
 #include <ql/qldefines.hpp>
@@ -23,6 +28,7 @@
 #include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmdiscretebarrierstepcondition.hpp>
 #include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
 #include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
 #include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
@@ -37,9 +43,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <list>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -135,6 +143,21 @@ static std::string schemeName(FdmBlackScholesSpatialDesc::Scheme s) {
     }
 }
 
+static std::string policyName(FdmBlackScholesSpatialDesc::MMatrixPolicy p) {
+    switch (p) {
+      case FdmBlackScholesSpatialDesc::MMatrixPolicy::None:
+        return "None";
+      case FdmBlackScholesSpatialDesc::MMatrixPolicy::DiagnosticsOnly:
+        return "DiagnosticsOnly";
+      case FdmBlackScholesSpatialDesc::MMatrixPolicy::FailFast:
+        return "FailFast";
+      case FdmBlackScholesSpatialDesc::MMatrixPolicy::FallbackToExponentialFitting:
+        return "FallbackToExponentialFitting";
+      default:
+        return "Unknown";
+    }
+}
+
 static FdmBlackScholesSpatialDesc descForScheme(
         FdmBlackScholesSpatialDesc::Scheme s,
         FdmBlackScholesSpatialDesc::MMatrixPolicy policy =
@@ -143,6 +166,28 @@ static FdmBlackScholesSpatialDesc descForScheme(
     d.scheme = s;
     d.mMatrixPolicy = policy;
     return d;
+}
+
+// Write the standard metadata block to a CSV for solver-based experiments.
+static void writeStandardMeta(CsvWriter& csv,
+                              const std::string& schemeName_,
+                              const std::string& effectiveScheme,
+                              Size xGrid, Size tGrid,
+                              Rate r, Rate q, Volatility sigma,
+                              Real strike, Time maturity,
+                              const std::string& mMatrixPol,
+                              const std::string& mesh) {
+    csv.meta("scheme", schemeName_);
+    csv.meta("effective_scheme", effectiveScheme);
+    csv.meta("xGrid", xGrid);
+    csv.meta("tGrid", tGrid);
+    csv.meta("r", r);
+    csv.meta("q", q);
+    csv.meta("sigma", sigma);
+    csv.meta("strike", strike);
+    csv.meta("maturity", maturity);
+    csv.meta("mMatrixPolicy", mMatrixPol);
+    csv.meta("mesh", mesh);
 }
 
 // Black-Scholes analytical call price
@@ -155,6 +200,37 @@ static Real bsCall(Real S, Real K, Rate r, Rate q,
     CumulativeNormalDistribution N;
     return S * std::exp(-q * T) * N(d1)
          - K * std::exp(-r * T) * N(d2);
+}
+
+// Look up the value of a solution array at a given spot level
+// by finding the nearest grid node.
+static Real valueAtSpot(const Array& v,
+                        const ext::shared_ptr<FdmMesher>& mesher,
+                        Real spotLevel, Size direction = 0) {
+    const Real xTarget = std::log(spotLevel);
+    Size bestIdx = 0;
+    Real bestDist = 1e30;
+    for (const auto& iter : *mesher->layout()) {
+        const Real x = mesher->location(iter, direction);
+        const Real d = std::fabs(x - xTarget);
+        if (d < bestDist) {
+            bestDist = d;
+            bestIdx = iter.index();
+        }
+    }
+    return v[bestIdx];
+}
+
+// Build a payoff vector on the grid.
+static Array buildPayoff(const ext::shared_ptr<FdmMesher>& mesher,
+                         const ext::shared_ptr<Payoff>& payoff,
+                         Size direction = 0) {
+    Array rhs(mesher->layout()->size());
+    for (const auto& iter : *mesher->layout()) {
+        const Real S = std::exp(mesher->location(iter, direction));
+        rhs[iter.index()] = (*payoff)(S);
+    }
+    return rhs;
 }
 
 // Truncated call payoff: max(S-K, 0) * 1_{[K,U]}(S)
@@ -172,7 +248,7 @@ class TruncatedCallPayoff : public Payoff {
 };
 
 // =====================================================================
-// Experiment 1-2: Truncated call (Figs 1-2)
+// Experiment 1-2: Truncated call — one CSV per scheme (Figs 1-2)
 // =====================================================================
 
 void runTruncatedCall(const std::string& dataDir) {
@@ -199,23 +275,6 @@ void runTruncatedCall(const std::string& dataDir) {
                         Scheme::ExponentialFitting,
                         Scheme::MilevTaglianiCNEffectiveDiffusion};
 
-    CsvWriter csv(dataDir + "/truncated_call.csv");
-    csv.meta("experiment", "truncated_call");
-    csv.meta("r", r);
-    csv.meta("q", q);
-    csv.meta("sigma", vol);
-    csv.meta("strike", K);
-    csv.meta("upper_barrier", U);
-    csv.meta("maturity", T);
-    csv.meta("xGrid", xGrid);
-    csv.meta("tGrid", tGrid);
-    csv.meta("mesh", "Uniform1dMesher");
-    csv.meta("time_scheme", "CrankNicolson");
-    csv.meta("mMatrixPolicy", "None");
-    csv.header("S", "StandardCentral", "ExponentialFitting", "MilevTaglianiCN");
-
-    // Solve for each scheme
-    std::vector<Array> solutions(3);
     auto mesher = ext::make_shared<FdmMesherComposite>(
         ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
 
@@ -239,16 +298,59 @@ void runTruncatedCall(const std::string& dataDir) {
             false, -Null<Real>(),
             Handle<FdmQuantoHelper>(), desc);
 
-        solutions[s].resize(xGrid);
+        std::string schName = schemeName(schemes[s]);
+        CsvWriter csv(dataDir + "/truncated_call_" + schName + ".csv");
+        writeStandardMeta(csv, schName, schName,
+                          xGrid, tGrid, r, q, vol, K, T,
+                          "None", "Uniform1dMesher");
+        csv.meta("upper_barrier", U);
+        csv.header("S", "price");
+
         for (Size i = 0; i < xGrid; ++i) {
-            solutions[s][i] = solver.valueAt(std::exp(locs[i]));
+            Real S = std::exp(locs[i]);
+            csv.row(S, solver.valueAt(S));
         }
     }
 
-    // Write rows
-    for (Size i = 0; i < xGrid; ++i) {
-        Real S = std::exp(locs[i]);
-        csv.row(S, solutions[0][i], solutions[1][i], solutions[2][i]);
+    // Fine-grid reference using ExponentialFitting at 8x refinement
+    {
+        const Size fineX = xGrid * 8;
+        const Size fineT = tGrid * 8;
+
+        auto fineMesher = ext::make_shared<FdmMesherComposite>(
+            ext::make_shared<Uniform1dMesher>(xMin, xMax, fineX));
+        auto fineCalc = ext::make_shared<FdmLogInnerValue>(payoff, fineMesher, 0);
+        auto fineCond = ext::make_shared<FdmStepConditionComposite>(
+            std::list<std::vector<Time>>(),
+            FdmStepConditionComposite::Conditions());
+        auto fineDesc = descForScheme(
+            Scheme::ExponentialFitting,
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::FallbackToExponentialFitting);
+
+        FdmSolverDesc fineSolverDesc = {
+            fineMesher, FdmBoundaryConditionSet(), fineCond,
+            fineCalc, T, fineT, 0};
+
+        FdmBlackScholesSolver fineSolver(
+            Handle<GeneralizedBlackScholesProcess>(process),
+            K, fineSolverDesc,
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(), fineDesc);
+
+        CsvWriter csv(dataDir + "/truncated_call_reference.csv");
+        writeStandardMeta(csv, "ExponentialFitting", "ExponentialFitting",
+                          fineX, fineT, r, q, vol, K, T,
+                          "FallbackToExponentialFitting", "Uniform1dMesher");
+        csv.meta("upper_barrier", U);
+        csv.meta("refinement_factor", Size(8));
+        csv.header("S", "price");
+
+        // Output on the original coarse grid spots for comparison
+        for (Size i = 0; i < xGrid; ++i) {
+            Real S = std::exp(locs[i]);
+            csv.row(S, fineSolver.valueAt(S));
+        }
     }
 
     std::cout << " done.\n";
@@ -278,31 +380,23 @@ void runGridConvergence(const std::string& dataDir) {
 
     Size grids[] = {25, 50, 100, 200, 400, 800, 1600};
 
-    CsvWriter csv(dataDir + "/grid_convergence.csv");
-    csv.meta("experiment", "grid_convergence");
-    csv.meta("spot", spot);
-    csv.meta("r", r);
-    csv.meta("q", q);
-    csv.meta("sigma", vol);
-    csv.meta("strike", K);
-    csv.meta("maturity", T);
-    csv.meta("reference_price", refPrice);
-    csv.meta("time_scheme", "CrankNicolson");
-    csv.meta("mMatrixPolicy", "None");
-    csv.header("xGrid", "tGrid",
-               "StandardCentral", "ExponentialFitting", "MilevTaglianiCN",
-               "err_StandardCentral", "err_ExponentialFitting",
-               "err_MilevTaglianiCN");
-
     ext::shared_ptr<StrikedTypePayoff> payoff(
         new PlainVanillaPayoff(Option::Call, K));
 
-    for (Size xGrid : grids) {
-        Size tGrid = 4 * xGrid;
-        Real prices[3];
+    for (Size si = 0; si < 3; ++si) {
+        std::string schName = schemeName(schemes[si]);
+        CsvWriter csv(dataDir + "/grid_convergence_" + schName + ".csv");
+        writeStandardMeta(csv, schName, schName,
+                          Size(0), Size(0), r, q, vol, K, T,
+                          "None", "FdmBlackScholesMesher");
+        csv.meta("spot", spot);
+        csv.meta("reference_price", refPrice);
+        csv.header("xGrid", "tGrid", "price", "error");
 
-        for (Size s = 0; s < 3; ++s) {
-            auto desc = descForScheme(schemes[s]);
+        for (Size xGrid : grids) {
+            Size tGrid = 4 * xGrid;
+
+            auto desc = descForScheme(schemes[si]);
             auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
                 xGrid, process, T, K);
             auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
@@ -322,14 +416,11 @@ void runGridConvergence(const std::string& dataDir) {
                 false, -Null<Real>(),
                 Handle<FdmQuantoHelper>(), desc);
 
-            prices[s] = solver.valueAt(spot);
-        }
+            Real price = solver.valueAt(spot);
 
-        csv.row(xGrid, tGrid,
-                prices[0], prices[1], prices[2],
-                std::fabs(prices[0] - refPrice),
-                std::fabs(prices[1] - refPrice),
-                std::fabs(prices[2] - refPrice));
+            csv.row(xGrid, tGrid,
+                    price, std::fabs(price - refPrice));
+        }
     }
 
     std::cout << " done.\n";
@@ -364,75 +455,54 @@ void runOperatorDiagnostics(const std::string& dataDir) {
                         Scheme::ExponentialFitting,
                         Scheme::MilevTaglianiCNEffectiveDiffusion};
 
-    // Off-diagonal data (Fig 7)
-    {
-        CsvWriter csv(dataDir + "/mmatrix_offdiag.csv");
-        csv.meta("experiment", "mmatrix_offdiag");
-        csv.meta("r", r);
-        csv.meta("q", q);
-        csv.meta("sigma", vol);
-        csv.meta("xGrid", xGrid);
-        csv.meta("mesh", "Uniform1dMesher");
-        csv.meta("mMatrixPolicy", "None");
-        csv.header("node", "S",
-                   "lower_SC", "upper_SC",
-                   "lower_EF", "upper_EF",
-                   "lower_MT", "upper_MT");
+    // Off-diagonal data (Fig 7) — one CSV per scheme
+    for (Size si = 0; si < 3; ++si) {
+        std::string schName = schemeName(schemes[si]);
+        CsvWriter csv(dataDir + "/mmatrix_offdiag_" + schName + ".csv");
+        writeStandardMeta(csv, schName, schName,
+                          xGrid, Size(0), r, q, vol, K, T,
+                          "None", "Uniform1dMesher");
+        csv.header("node", "S", "lower", "upper");
 
-        SparseMatrix mats[3];
-        for (Size s = 0; s < 3; ++s) {
-            auto desc = descForScheme(schemes[s]);
-            auto op = ext::make_shared<FdmBlackScholesOp>(
-                mesher, process, K,
-                false, -Null<Real>(), 0,
-                ext::shared_ptr<FdmQuantoHelper>(), desc);
-            op->setTime(0.0, dt);
-            mats[s] = op->toMatrix();
-        }
+        auto desc = descForScheme(schemes[si]);
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
 
         for (Size i = 1; i + 1 < xGrid; ++i) {
             Real S = std::exp(xMin + i * h);
             csv.row(i, S,
-                    Real(mats[0](i, i-1)), Real(mats[0](i, i+1)),
-                    Real(mats[1](i, i-1)), Real(mats[1](i, i+1)),
-                    Real(mats[2](i, i-1)), Real(mats[2](i, i+1)));
+                    Real(mat(i, i-1)), Real(mat(i, i+1)));
         }
     }
 
-    // Effective diffusion data (Fig 6)
-    {
-        CsvWriter csv(dataDir + "/effective_diffusion.csv");
-        csv.meta("experiment", "effective_diffusion");
-        csv.meta("r", r);
-        csv.meta("q", q);
-        csv.meta("sigma", vol);
-        csv.meta("xGrid", xGrid);
+    // Effective diffusion data (Fig 6) — one CSV per scheme
+    for (Size si = 0; si < 3; ++si) {
+        std::string schName = schemeName(schemes[si]);
+        CsvWriter csv(dataDir + "/effective_diffusion_" + schName + ".csv");
+        writeStandardMeta(csv, schName, schName,
+                          xGrid, Size(0), r, q, vol, K, T,
+                          "None", "Uniform1dMesher");
         csv.meta("h", h);
-        csv.meta("mesh", "Uniform1dMesher");
-        csv.meta("mMatrixPolicy", "None");
-        csv.header("node", "S",
-                   "aUsed_SC", "aUsed_EF", "aUsed_MT");
+        csv.header("node", "S", "aUsed");
 
-        SparseMatrix mats[3];
-        for (Size s = 0; s < 3; ++s) {
-            auto desc = descForScheme(schemes[s]);
-            auto op = ext::make_shared<FdmBlackScholesOp>(
-                mesher, process, K,
-                false, -Null<Real>(), 0,
-                ext::shared_ptr<FdmQuantoHelper>(), desc);
-            op->setTime(0.0, dt);
-            mats[s] = op->toMatrix();
-        }
+        auto desc = descForScheme(schemes[si]);
+        auto op = ext::make_shared<FdmBlackScholesOp>(
+            mesher, process, K,
+            false, -Null<Real>(), 0,
+            ext::shared_ptr<FdmQuantoHelper>(), desc);
+        op->setTime(0.0, dt);
+        SparseMatrix mat = op->toMatrix();
 
         for (Size i = 1; i + 1 < xGrid; ++i) {
             Real S = std::exp(xMin + i * h);
-            Real aUsed[3];
-            for (Size s = 0; s < 3; ++s) {
-                Real lower = Real(mats[s](i, i-1));
-                Real upper = Real(mats[s](i, i+1));
-                aUsed[s] = (lower + upper) * h * h / 2.0;
-            }
-            csv.row(i, S, aUsed[0], aUsed[1], aUsed[2]);
+            Real lower = Real(mat(i, i-1));
+            Real upper = Real(mat(i, i+1));
+            Real aUsed = (lower + upper) * h * h / 2.0;
+            csv.row(i, S, aUsed);
         }
     }
 
@@ -447,9 +517,20 @@ void runXCothx(const std::string& dataDir) {
     std::cout << "  Running xCothx data generation..." << std::flush;
 
     CsvWriter csv(dataDir + "/xcothx.csv");
+    csv.meta("scheme", "N/A");
+    csv.meta("effective_scheme", "N/A");
+    csv.meta("xGrid", "N/A");
+    csv.meta("tGrid", "N/A");
+    csv.meta("r", "N/A");
+    csv.meta("q", "N/A");
+    csv.meta("sigma", "N/A");
+    csv.meta("strike", "N/A");
+    csv.meta("maturity", "N/A");
+    csv.meta("mMatrixPolicy", "N/A");
+    csv.meta("mesh", "N/A");
     csv.meta("experiment", "xcothx");
-    csv.meta("xSmall", 1e-6);
-    csv.meta("xLarge", 50.0);
+    csv.meta("xSmall", Real(1e-6));
+    csv.meta("xLarge", Real(50.0));
     csv.header("Pe", "xCothx", "abs_Pe");
 
     // Dense sampling across regimes
@@ -503,28 +584,35 @@ void runBenchmark(const std::string& dataDir) {
     Size grids[] = {50, 100, 200, 400, 800, 1600};
     const Size nRuns = 5;
 
-    CsvWriter csv(dataDir + "/benchmark.csv");
-    csv.meta("experiment", "benchmark");
-    csv.meta("spot", spot);
-    csv.meta("r", r);
-    csv.meta("q", q);
-    csv.meta("sigma", vol);
-    csv.meta("strike", K);
-    csv.meta("maturity", T);
-    csv.meta("reference_price", refPrice);
-    csv.meta("time_scheme", "CrankNicolson");
-    csv.meta("mMatrixPolicy", "FallbackToExponentialFitting");
-    csv.meta("num_runs", nRuns);
-    csv.header("xGrid", "scheme", "median_time_ms", "price", "error");
-
     ext::shared_ptr<StrikedTypePayoff> payoff(
         new PlainVanillaPayoff(Option::Call, K));
 
-    for (Size xGrid : grids) {
-        Size tGrid = 4 * xGrid;
+    // One CSV per scheme
+    for (Size si = 0; si < 3; ++si) {
+        std::string schName = schemeName(schemes[si]);
 
-        for (Size s = 0; s < 3; ++s) {
-            auto desc = descForScheme(schemes[s],
+        // With FallbackToExponentialFitting, the effective scheme may differ
+        // from the requested scheme (StandardCentral falls back to ExpFit
+        // at nodes where M-matrix is violated).
+        std::string effectiveScheme = schName;
+        if (schemes[si] == Scheme::StandardCentral)
+            effectiveScheme = "StandardCentral_with_fallback";
+
+        CsvWriter csv(dataDir + "/benchmark_" + schName + ".csv");
+        writeStandardMeta(csv, schName, effectiveScheme,
+                          Size(0), Size(0), r, q, vol, K, T,
+                          "FallbackToExponentialFitting",
+                          "FdmBlackScholesMesher");
+        csv.meta("spot", spot);
+        csv.meta("reference_price", refPrice);
+        csv.meta("num_runs", nRuns);
+        csv.meta("timing_note", "wall-clock minimum across runs (ms)");
+        csv.header("xGrid", "min_time_ms", "price", "error");
+
+        for (Size xGrid : grids) {
+            Size tGrid = 4 * xGrid;
+
+            auto desc = descForScheme(schemes[si],
                 FdmBlackScholesSpatialDesc::MMatrixPolicy::FallbackToExponentialFitting);
 
             std::vector<double> timings;
@@ -559,11 +647,10 @@ void runBenchmark(const std::string& dataDir) {
                 timings.push_back(ms);
             }
 
-            std::sort(timings.begin(), timings.end());
-            double medianTime = timings[nRuns / 2];
+            // Use minimum time (more stable than median across runs)
+            double minTime = *std::min_element(timings.begin(), timings.end());
 
-            csv.row(xGrid, schemeName(schemes[s]),
-                    medianTime, price,
+            csv.row(xGrid, minTime, price,
                     std::fabs(price - refPrice));
         }
     }
@@ -573,6 +660,9 @@ void runBenchmark(const std::string& dataDir) {
 
 // =====================================================================
 // Experiment 3-4: Discrete double barrier knock-out (Figs 3-4)
+//
+// Uses FdmDiscreteBarrierStepCondition + FdmStepConditionComposite
+// + FdmBackwardSolver with a single rollback call.
 // =====================================================================
 
 void runDiscreteBarrier(const std::string& dataDir,
@@ -589,7 +679,7 @@ void runDiscreteBarrier(const std::string& dataDir,
                         Scheme::ExponentialFitting,
                         Scheme::MilevTaglianiCNEffectiveDiffusion};
 
-    // Monitoring dates (equally spaced)
+    // Monitoring dates (equally spaced, including maturity)
     std::vector<Time> monitoringTimes;
     for (Size i = 1; i <= nMonitoring; ++i)
         monitoringTimes.push_back(T * Real(i) / Real(nMonitoring));
@@ -609,116 +699,63 @@ void runDiscreteBarrier(const std::string& dataDir,
         [](Real a, Real b){ return std::fabs(a-b) < 1e-8; }),
         spots.end());
 
-    CsvWriter csv(dataDir + "/barrier_" + label + ".csv");
-    csv.meta("experiment", "discrete_barrier_" + label);
-    csv.meta("r", r);
-    csv.meta("q", q);
-    csv.meta("sigma", vol);
-    csv.meta("strike", K);
-    csv.meta("lower_barrier", L);
-    csv.meta("upper_barrier", U);
-    csv.meta("maturity", T);
-    csv.meta("n_monitoring", nMonitoring);
-    csv.meta("xGrid", xGrid);
-    csv.meta("tGrid", tGrid);
-    csv.meta("mesh", "FdmBlackScholesMesher");
-    csv.meta("time_scheme", "CrankNicolson");
-    csv.meta("mMatrixPolicy", "None");
-    csv.header("S", "StandardCentral", "ExponentialFitting", "MilevTaglianiCN");
-
-    // For each scheme, solve with barrier step condition
-    // Using manual rollback with FdmBackwardSolver and step conditions
     ext::shared_ptr<StrikedTypePayoff> payoff(
         new PlainVanillaPayoff(Option::Call, K));
 
-    std::vector<std::vector<Real>> results(3);
-    for (Size s = 0; s < 3; ++s) {
-        auto desc = descForScheme(schemes[s]);
+    // Barrier mesh with concentration at K, L, U
+    std::vector<std::tuple<Real, Real, bool>> cPoints = {
+        {K, 0.1, true}, {L, 0.1, true}, {U, 0.1, true}
+    };
+    auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
+        xGrid, process, T, K,
+        Null<Real>(), Null<Real>(), 0.0001, 1.5,
+        cPoints);
+    auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
 
-        std::vector<std::tuple<Real, Real, bool>> cPoints = {
-            {K, 0.1, true}, {L, 0.1, true}, {U, 0.1, true}
-        };
-        auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
-            xGrid, process, T, K,
-            Null<Real>(), Null<Real>(), 0.0001, 1.5,
-            cPoints);
-        auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
-        auto calc = ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+    // Step condition: discrete double barrier knock-out
+    auto barrierCondition =
+        ext::make_shared<FdmDiscreteBarrierStepCondition>(
+            mesher, monitoringTimes, L, U);
 
-        // Set up the terminal payoff
-        const Size n = mesher->layout()->size();
-        Array rhs(n);
-        for (const auto& iter : *mesher->layout()) {
-            Real S = std::exp(mesher->location(iter, 0));
-            rhs[iter.index()] = (*payoff)(S);
-            // Apply initial barrier condition
-            if (S < L || S > U)
-                rhs[iter.index()] = 0.0;
-        }
+    auto conditions = ext::make_shared<FdmStepConditionComposite>(
+        std::list<std::vector<Time>>(1, monitoringTimes),
+        FdmStepConditionComposite::Conditions(1, barrierCondition));
+
+    const FdmBoundaryConditionSet bcSet;
+
+    // One CSV per scheme
+    for (Size si = 0; si < 3; ++si) {
+        auto desc = descForScheme(schemes[si]);
+        std::string schName = schemeName(schemes[si]);
+
+        CsvWriter csv(dataDir + "/barrier_" + label + "_" + schName + ".csv");
+        writeStandardMeta(csv, schName, schName,
+                          xGrid, tGrid, r, q, vol, K, T,
+                          "None", "FdmBlackScholesMesher");
+        csv.meta("lower_barrier", L);
+        csv.meta("upper_barrier", U);
+        csv.meta("n_monitoring", nMonitoring);
+        csv.header("S", "price");
 
         // Create operator
         auto op = ext::make_shared<FdmBlackScholesOp>(
             mesher, process, K,
-            false, -Null<Real>(), 0,
+            false, -Null<Real>(), Size(0),
             ext::shared_ptr<FdmQuantoHelper>(), desc);
 
-        // Roll back with barrier application at monitoring dates
-        ext::shared_ptr<FdmStepConditionComposite> noCondition;
-        FdmBackwardSolver solver(op, FdmBoundaryConditionSet(),
-                                 noCondition,
+        // Build payoff vector
+        Array rhs = buildPayoff(mesher, payoff);
+
+        // Single rollback call — the step condition handles barrier
+        // application automatically at monitoring times.
+        FdmBackwardSolver solver(op, bcSet, conditions,
                                  FdmSchemeDesc::CrankNicolson());
+        solver.rollback(rhs, T, 0.0, tGrid, 0);
 
-        // Roll back from T to 0, applying barrier at monitoring dates
-        Real tPrev = T;
-        for (auto it = monitoringTimes.rbegin();
-             it != monitoringTimes.rend(); ++it) {
-            Real tMon = *it;
-            Size nSteps = std::max(Size(1),
-                Size(std::round(tGrid * (tPrev - tMon) / T)));
-            solver.rollback(rhs, tPrev, tMon, nSteps, 0);
-
-            // Apply barrier condition: zero outside [L, U]
-            for (const auto& iter : *mesher->layout()) {
-                Real S = std::exp(mesher->location(iter, 0));
-                if (S < L || S > U)
-                    rhs[iter.index()] = 0.0;
-            }
-            tPrev = tMon;
-        }
-        // Final rollback to t=0
-        if (tPrev > 0.0) {
-            Size nSteps = std::max(Size(1),
-                Size(std::round(tGrid * tPrev / T)));
-            solver.rollback(rhs, tPrev, 0.0, nSteps, 0);
-        }
-
-        // Interpolate at requested spot values
-        const Array barrierLocs = mesher->locations(0);
-        results[s].resize(spots.size());
+        // Look up values at requested spots via valueAtSpot
         for (Size j = 0; j < spots.size(); ++j) {
-            Real x = std::log(spots[j]);
-            if (x <= barrierLocs[0]) {
-                results[s][j] = rhs[0];
-            } else if (x >= barrierLocs[n-1]) {
-                results[s][j] = rhs[n-1];
-            } else {
-                // Binary search for bracket
-                Size lo = 0, hi = n - 1;
-                while (hi - lo > 1) {
-                    Size mid = (lo + hi) / 2;
-                    if (barrierLocs[mid] <= x)
-                        lo = mid;
-                    else
-                        hi = mid;
-                }
-                Real w = (x - barrierLocs[lo]) / (barrierLocs[hi] - barrierLocs[lo]);
-                results[s][j] = (1.0 - w) * rhs[lo] + w * rhs[hi];
-            }
+            csv.row(spots[j], valueAtSpot(rhs, mesher, spots[j]));
         }
-    }
-
-    for (Size j = 0; j < spots.size(); ++j) {
-        csv.row(spots[j], results[0][j], results[1][j], results[2][j]);
     }
 
     std::cout << " done.\n";
@@ -746,16 +783,22 @@ void runBarrierMC(const std::string& dataDir,
     }
 
     CsvWriter csv(dataDir + "/mc_barrier_" + label + ".csv");
-    csv.meta("experiment", "mc_barrier_" + label);
+    csv.meta("scheme", "N/A");
+    csv.meta("effective_scheme", "N/A");
+    csv.meta("xGrid", "N/A");
+    csv.meta("tGrid", "N/A");
     csv.meta("r", r);
     csv.meta("q", q);
     csv.meta("sigma", vol);
     csv.meta("strike", K);
+    csv.meta("maturity", T);
+    csv.meta("mMatrixPolicy", "N/A");
+    csv.meta("mesh", "N/A");
     csv.meta("lower_barrier", L);
     csv.meta("upper_barrier", U);
-    csv.meta("maturity", T);
     csv.meta("n_monitoring", nMonitoring);
     csv.meta("num_paths", nPaths);
+    csv.meta("min_price_threshold", Real(0.01));
     csv.header("S0", "price", "standard_error", "num_paths");
 
     Real dt = T / nMonitoring;
@@ -792,7 +835,11 @@ void runBarrierMC(const std::string& dataDir,
         Real var = sumPayoff2 / nPaths - mean * mean;
         Real se = std::sqrt(var / nPaths);
 
-        csv.row(S0, mean, se, nPaths);
+        // Only report spots where price > 0.01 (skip near-zero tails
+        // where relative SE is ill-defined)
+        if (mean > 0.01) {
+            csv.row(S0, mean, se, nPaths);
+        }
     }
 
     std::cout << " done.\n";
@@ -802,28 +849,22 @@ void runBarrierMC(const std::string& dataDir,
 // Main
 // =====================================================================
 
-int main() {
+int main(int argc, char* argv[]) {
     try {
         Date today(28, March, 2004);
         Settings::instance().evaluationDate() = today;
 
-        std::string dataDir = "data";
-        // Create data directory if running from results/build
-        // Adjust path relative to the source results/ directory
-        {
-            std::ifstream test(dataDir + "/.gitkeep");
-            if (!test) {
-                dataDir = "../data";
-                std::ifstream test2(dataDir + "/.gitkeep");
-                if (!test2) {
-                    // Try creating from current dir
-                    dataDir = "data";
-                    system("mkdir -p data");
-                }
-            }
+        // Output directory: command-line arg or default to ../data
+        std::string dataDir = "../data";
+        if (argc > 1) {
+            dataDir = argv[1];
         }
 
-        std::cout << "Generating results data...\n";
+        // Create output directory
+        std::string mkdirCmd = "mkdir -p " + dataDir;
+        std::system(mkdirCmd.c_str());
+
+        std::cout << "Generating results data (output: " << dataDir << ")...\n";
 
         // Fig 9: xCothx/Peclet (fastest, no solver)
         runXCothx(dataDir);
@@ -834,7 +875,7 @@ int main() {
         // Fig 5: Grid convergence
         runGridConvergence(dataDir);
 
-        // Figs 1-2: Truncated call
+        // Figs 1-2: Truncated call (with fine-grid reference)
         runTruncatedCall(dataDir);
 
         // Fig 8: Performance benchmark
@@ -852,17 +893,17 @@ int main() {
                            100.0, 95.0, 110.0, 1.0,
                            5, 2000, 50000);
 
-        // MC reference: moderate-vol barrier
+        // MC reference: moderate-vol barrier (5M paths)
         runBarrierMC(dataDir, "moderate_vol",
                      0.05, 0.0, 0.25,
                      100.0, 95.0, 110.0, 0.5,
-                     5, 1000000);
+                     5, 5000000);
 
-        // MC reference: low-vol barrier
+        // MC reference: low-vol barrier (5M paths)
         runBarrierMC(dataDir, "low_vol",
                      0.05, 0.0, 0.001,
                      100.0, 95.0, 110.0, 1.0,
-                     5, 1000000);
+                     5, 5000000);
 
         std::cout << "All experiments complete. CSV files in " << dataDir << "/\n";
         return 0;
