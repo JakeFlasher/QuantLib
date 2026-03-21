@@ -26,15 +26,19 @@ cd "$SCRIPT_DIR"
 echo "[3/4] Generating figures..."
 python3 "$SCRIPT_DIR/plot_figures.py"
 
-# 4. Reproducibility self-check (all artifacts, including benchmark)
+# 4. Reproducibility self-check (split: deterministic vs non-deterministic)
 echo "[4/4] Reproducibility hash check..."
 HASH_FILE="${DATA_DIR}/.artifact_hashes"
-md5sum "$DATA_DIR"/*.csv "$FIG_DIR"/*.pdf 2>/dev/null \
-    | sort > "${HASH_FILE}.new"
+
+# Deterministic artifacts only (exclude benchmark CSVs/PDFs with wall-clock timing)
+{
+  find "$DATA_DIR" -name '*.csv' ! -name 'benchmark_*.csv' -print0 | xargs -0 md5sum 2>/dev/null
+  find "$FIG_DIR" -name '*.pdf' ! -name 'fig8_benchmark.pdf' -print0 | xargs -0 md5sum 2>/dev/null
+} | sort > "${HASH_FILE}.new"
 
 if [ -f "$HASH_FILE" ]; then
     if diff -q "$HASH_FILE" "${HASH_FILE}.new" > /dev/null 2>&1; then
-        echo "      Reproducibility check PASSED: all non-benchmark hashes match."
+        echo "      Reproducibility check PASSED: all deterministic hashes match."
     else
         echo "      WARNING: Hash mismatch detected. Diff:"
         diff "$HASH_FILE" "${HASH_FILE}.new" || true

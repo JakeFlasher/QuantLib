@@ -35,6 +35,7 @@
 #include <ql/time/daycounters/actual365fixed.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -611,15 +612,31 @@ void runBenchmark(const std::string& dataDir) {
         csv.meta("spot", spot);
         csv.meta("reference_price", refPrice);
         csv.meta("cost_note", "relative_cost = xGrid * tGrid (deterministic proxy for runtime)");
-        csv.header("xGrid", "tGrid", "relative_cost", "price", "error");
+        csv.meta("timing_note", "wall_ms = median of 3 runs after 1 warm-up (std::chrono::steady_clock)");
+        csv.header("xGrid", "tGrid", "relative_cost", "price", "error", "wall_ms");
 
         auto desc = descForScheme(scheme);
         for (Size xGrid : grids) {
             Size tGrid = 4 * xGrid;
-            Real price = solveEuropean(process, payoff, desc,
-                                       K, T, xGrid, tGrid, spot);
+
+            // Warm-up run (discard)
+            solveEuropean(process, payoff, desc, K, T, xGrid, tGrid, spot);
+
+            // Timed runs: median of 3
+            double times[3];
+            Real price = 0.0;
+            for (int rep = 0; rep < 3; ++rep) {
+                auto t0 = std::chrono::steady_clock::now();
+                price = solveEuropean(process, payoff, desc,
+                                      K, T, xGrid, tGrid, spot);
+                auto t1 = std::chrono::steady_clock::now();
+                times[rep] = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            }
+            std::sort(times, times + 3);
+            double wallMs = times[1];  // median
+
             csv.row(xGrid, tGrid, Size(xGrid) * Size(tGrid),
-                    price, std::fabs(price - refPrice));
+                    price, std::fabs(price - refPrice), wallMs);
         }
     }
 
@@ -749,10 +766,19 @@ void runBarrierMC(const std::string& dataDir,
 
     std::vector<Real> spots;
     if (vol > 0.1) {
-        spots = {95.0, 95.0001, 95.5, 99.5, 100.0, 100.5,
-                 109.5, 109.9999, 110.0};
+        // Dense uniform grid + paper Table 1 spots (union, deduplicated)
+        for (Real S = L - 2.0; S <= U + 2.0; S += 0.5)
+            spots.push_back(S);
+        for (Real S : {95.0, 95.0001, 95.5, 99.5, 100.0, 100.5,
+                       109.5, 109.9999, 110.0})
+            spots.push_back(S);
+        std::sort(spots.begin(), spots.end());
+        spots.erase(std::unique(spots.begin(), spots.end(),
+            [](Real a, Real b){ return std::fabs(a-b) < 1e-8; }),
+            spots.end());
     } else {
-        for (Real S = L; S <= U; S += 1.0)
+        // Dense uniform grid across [L, U]
+        for (Real S = L; S <= U; S += 0.5)
             spots.push_back(S);
     }
 
@@ -772,7 +798,9 @@ void runBarrierMC(const std::string& dataDir,
     csv.meta("upper_barrier", U);
     csv.meta("n_monitoring", nMonitoring);
     csv.meta("num_paths", nPaths);
-    csv.meta("min_price_threshold", Real(0.01));
+    // For low-vol, include all spots (zero prices are meaningful near barriers)
+    Real minThreshold = (vol > 0.1) ? 0.01 : -1.0;
+    csv.meta("min_price_threshold", (vol > 0.1) ? Real(0.01) : Real(0.0));
     csv.header("S0", "price", "standard_error", "num_paths");
 
     Real dt = T / nMonitoring;
@@ -811,7 +839,7 @@ void runBarrierMC(const std::string& dataDir,
 
         // Only report spots where price > 0.01 (skip near-zero tails
         // where relative SE is ill-defined)
-        if (mean > 0.01) {
+        if (mean > minThreshold) {
             csv.row(S0, mean, se, nPaths);
         }
     }
@@ -879,11 +907,11 @@ int main(int argc, char* argv[]) {
                            5, 800, 200,
                            /*useUniformMesh=*/true);
 
-        // MC reference: moderate-vol barrier (5M paths)
+        // MC reference: moderate-vol barrier (10M paths)
         runBarrierMC(dataDir, "moderate_vol",
                      0.05, 0.0, 0.25,
                      100.0, 95.0, 110.0, 0.5,
-                     5, 5000000);
+                     5, 10000000);
 
         // MC reference: low-vol barrier (5M paths)
         runBarrierMC(dataDir, "low_vol",

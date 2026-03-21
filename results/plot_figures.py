@@ -59,7 +59,7 @@ LABELS = {
     'ExponentialFitting': 'Exponential Fitting (Duffy)',
     'MilevTaglianiCN': r'Milev-Tagliani CN Variant',
     'reference': 'Fine-Grid Reference',
-    'MC': r'MC ($5 \times 10^6$ paths)',
+    'MC': r'MC ($10^7$ paths)',
 }
 
 SCRIPT_DIR = Path(__file__).parent
@@ -71,6 +71,9 @@ REQUIRED_META = {'scheme', 'effective_scheme', 'xGrid', 'tGrid',
                  'mMatrixPolicy', 'mesh'}
 
 SCHEME_ORDER = ['StandardCentral', 'ExponentialFitting', 'MilevTaglianiCN']
+
+# Annotation text box style
+ANNOT_BOX = dict(boxstyle='round,pad=0.3', facecolor='wheat', alpha=0.8)
 
 
 def read_csv(filename):
@@ -157,6 +160,16 @@ def fig1():
                  r'($\sigma=0.001$, $r=0.05$)')
     ax.legend(loc='upper left')
     ax.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
+
+    # Annotation: explain physical meaning of oscillations
+    ax.text(0.98, 0.55,
+            'Negative prices near $U$:\n'
+            r'M-matrix violated ($\sigma^2 \ll r$).'
+            '\nEigenvalues of $P^{-1}N \\to -1$.',
+            transform=ax.transAxes, fontsize=7,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=ANNOT_BOX)
+
     save_pdf(fig, 'fig1_cn_oscillations.pdf')
     print('  Fig 1: CN oscillations')
 
@@ -204,6 +217,13 @@ def fig2():
     ax2.set_ylabel(r'$V(S)$')
     ax2.set_title(f'Zoom near $U={int(U)}$')
     ax2.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
+
+    # Annotation on zoom panel
+    ax2.text(0.95, 0.95, 'EF and MT:\nsmooth, positive',
+             transform=ax2.transAxes, fontsize=7,
+             verticalalignment='top', horizontalalignment='right',
+             bbox=ANNOT_BOX)
+
     fig.tight_layout()
     save_pdf(fig, 'fig2_three_scheme_truncated.pdf')
     print('  Fig 2: Three-scheme truncated call')
@@ -222,39 +242,55 @@ def fig3():
             first_meta = m
         L = float(m['lower_barrier'])
         U = float(m['upper_barrier'])
-        mask = (arr['S'] >= L - 1) & (arr['S'] <= U + 1)
+        mask = (arr['S'] >= L - 5) & (arr['S'] <= U + 5)
         ax.plot(arr['S'][mask], arr['price'][mask],
                 color=COLORS[s], ls=STYLES[s], label=LABELS[s])
 
-    # Fine-grid reference
+    # Fine-grid reference — thicker, distinct style for visibility
     try:
         _, ref = load_csv(
             'barrier_moderate_vol_reference_ExponentialFitting.csv')
-        mask_r = (ref['S'] >= L - 1) & (ref['S'] <= U + 1)
+        mask_r = (ref['S'] >= L - 5) & (ref['S'] <= U + 5)
         ax.plot(ref['S'][mask_r], ref['price'][mask_r],
-                color=COLORS['reference'], ls=STYLES['reference'], lw=0.8,
-                label='Fine-Grid Reference (16k)')
+                color=COLORS['reference'], ls=(0, (3, 1, 1, 1)), lw=2.0,
+                label='Fine-Grid Reference (16k)', zorder=0)
     except FileNotFoundError:
         pass
 
     # MC reference
     try:
-        _, mc = load_csv('mc_barrier_moderate_vol.csv', validate=False)
-        ax.errorbar(mc['S0'], mc['price'], yerr=2*mc['standard_error'],
-                     fmt='o', color=COLORS['MC'], ms=3, lw=0.8,
-                     capsize=2, label=LABELS['MC'])
+        mc_meta, mc = load_csv('mc_barrier_moderate_vol.csv', validate=False)
+        n_paths = mc_meta.get('num_paths', '10000000')
+        mc_label = f'MC ({int(n_paths)/1e6:.0f}M paths, 95% CI)'
+        mc_mask = (mc['S0'] >= L - 5) & (mc['S0'] <= U + 5)
+        ax.errorbar(mc['S0'][mc_mask], mc['price'][mc_mask],
+                     yerr=2*mc['standard_error'][mc_mask],
+                     fmt='o', color=COLORS['MC'], ms=2.5, lw=0.6,
+                     capsize=1.5, label=mc_label)
     except FileNotFoundError:
         pass
 
     L = float(first_meta['lower_barrier'])
     U = float(first_meta['upper_barrier'])
+    ax.set_xlim(L - 5, U + 5)
     ax.set_xlabel(r'Stock Price $S$')
     ax.set_ylabel(r'Option Value $V(S)$')
     ax.set_title(r'Discrete Double Barrier '
                  r'($\sigma=0.25$, $K=100$, $L=95$, $U=110$)')
-    ax.legend(fontsize=7)
-    ax.axvline(L, color='gray', ls=':', lw=0.5, alpha=0.5)
-    ax.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
+    ax.legend(fontsize=6.5, loc='upper left')
+    ax.axvline(L, color='gray', ls='--', lw=0.8, alpha=0.6)
+    ax.axvline(U, color='gray', ls='--', lw=0.8, alpha=0.6)
+    ax.text(L, ax.get_ylim()[1]*0.95, f' $L={int(L)}$', fontsize=7,
+            va='top', color='gray')
+    ax.text(U, ax.get_ylim()[1]*0.95, f' $U={int(U)}$', fontsize=7,
+            va='top', color='gray')
+
+    # Annotation: MC metadata
+    ax.text(0.98, 0.45, f'10M paths, 95% CI\n5 monitoring dates\n$T=0.5$',
+            transform=ax.transAxes, fontsize=7,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=ANNOT_BOX)
+
     save_pdf(fig, 'fig3_barrier_moderate.pdf')
     print('  Fig 3: Moderate-vol barrier')
 
@@ -272,29 +308,48 @@ def fig4():
             first_meta = m
         L = float(m['lower_barrier'])
         U = float(m['upper_barrier'])
-        mask = (arr['S'] >= L - 1) & (arr['S'] <= U + 1)
+        mask = (arr['S'] >= L - 5) & (arr['S'] <= U + 5)
         ax.plot(arr['S'][mask], arr['price'][mask],
                 color=COLORS[s], ls=STYLES[s], label=LABELS[s])
 
     # MC reference (low-vol)
     try:
-        _, mc = load_csv('mc_barrier_low_vol.csv', validate=False)
-        ax.errorbar(mc['S0'], mc['price'], yerr=2*mc['standard_error'],
-                     fmt='o', color=COLORS['MC'], ms=3, lw=0.8,
-                     capsize=2, label=LABELS['MC'])
+        mc_meta, mc = load_csv('mc_barrier_low_vol.csv', validate=False)
+        n_paths = mc_meta.get('num_paths', '5000000')
+        mc_label = f'MC ({int(n_paths)/1e6:.0f}M paths, 95% CI)'
+        mc_mask = (mc['S0'] >= L - 5) & (mc['S0'] <= U + 5)
+        ax.errorbar(mc['S0'][mc_mask], mc['price'][mc_mask],
+                     yerr=2*mc['standard_error'][mc_mask],
+                     fmt='o', color=COLORS['MC'], ms=2.5, lw=0.6,
+                     capsize=1.5, label=mc_label)
     except FileNotFoundError:
         pass
 
     ax.axhline(0, color='red', ls=':', lw=0.5, alpha=0.7)
+    ax.set_xlim(L - 5, U + 5)
     ax.set_xlabel(r'Stock Price $S$')
     ax.set_ylabel(r'Option Value $V(S)$')
     ax.set_title(r'Low-Vol Discrete Barrier '
                  r'($\sigma=0.001$, $\sigma^2 \ll r$)')
-    ax.legend()
+    ax.legend(fontsize=7)
     L = float(first_meta['lower_barrier'])
     U = float(first_meta['upper_barrier'])
-    ax.axvline(L, color='gray', ls=':', lw=0.5, alpha=0.5)
-    ax.axvline(U, color='gray', ls=':', lw=0.5, alpha=0.5)
+    ax.axvline(L, color='gray', ls='--', lw=0.8, alpha=0.6)
+    ax.axvline(U, color='gray', ls='--', lw=0.8, alpha=0.6)
+    ax.text(L, ax.get_ylim()[1]*0.95, f' $L={int(L)}$', fontsize=7,
+            va='top', color='gray')
+    ax.text(U, ax.get_ylim()[1]*0.95, f' $U={int(U)}$', fontsize=7,
+            va='top', color='gray')
+
+    # Annotation: negative price region explanation
+    ax.text(0.98, 0.55,
+            r'MT undershoot at $\sigma^2 \ll r$:' '\n'
+            r'artificial diffusion $\frac{1}{8}(\frac{r}{\sigma}\Delta S)^2$'
+            '\nmay exceed true diffusion.',
+            transform=ax.transAxes, fontsize=6.5,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=ANNOT_BOX)
+
     save_pdf(fig, 'fig4_barrier_lowvol.pdf')
     print('  Fig 4: Low-vol barrier')
 
@@ -305,8 +360,10 @@ def fig4():
 
 def fig5():
     fig, ax = plt.subplots()
+    scheme_data = {}
     for s in SCHEME_ORDER:
         _, arr = load_csv(f'grid_convergence_{s}.csv')
+        scheme_data[s] = arr
         ax.loglog(arr['xGrid'], arr['error'],
                   color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
                   label=LABELS[s])
@@ -317,10 +374,36 @@ def fig5():
     ax.loglog(x, y0 * (x[0]/x)**2, 'k:', lw=0.5, alpha=0.5,
               label=r'$O(h^2)$ slope')
 
+    # Convergence rate annotations via least-squares fit on last 4 points
+    colors_list = [COLORS[s] for s in SCHEME_ORDER]
+    for i, s in enumerate(SCHEME_ORDER):
+        d = scheme_data[s]
+        log_x = np.log(d['xGrid'][-4:])
+        log_e = np.log(d['error'][-4:])
+        slope, _ = np.polyfit(log_x, log_e, 1)
+        rate = -slope
+        # Place annotation near the last point of each curve
+        last_x = d['xGrid'][-1]
+        last_y = d['error'][-1]
+        ax.annotate(
+            f'$\\alpha = {rate:.2f}$',
+            xy=(last_x, last_y),
+            xytext=(15, 5 + i*12),
+            textcoords='offset points',
+            fontsize=7, color=colors_list[i],
+            arrowprops=dict(arrowstyle='->', color=colors_list[i], lw=0.5))
+
+    # Label annotation explaining refinement type
+    ax.text(0.02, 0.02,
+            r'$\alpha$: joint (spatial+temporal) rate, last 4 points',
+            transform=ax.transAxes, fontsize=6.5,
+            verticalalignment='bottom', horizontalalignment='left',
+            bbox=ANNOT_BOX)
+
     ax.set_xlabel(r'Spatial Grid Size ($N_x$)')
     ax.set_ylabel(r'$|V_{\mathrm{num}} - V_{\mathrm{BS}}|$')
     ax.set_title(r'Grid Convergence: European Call ($\sigma=0.20$)')
-    ax.legend()
+    ax.legend(fontsize=7)
     save_pdf(fig, 'fig5_convergence.pdf')
     print('  Fig 5: Grid convergence')
 
@@ -340,6 +423,15 @@ def fig6():
     ax.set_ylabel(r'Effective Diffusion $a_{\mathrm{eff}}$')
     ax.set_title(r'Effective Diffusion vs Volatility ($\sigma$-Sweep)')
     ax.legend()
+
+    # Annotation: regime transition
+    ax.text(0.03, 0.97,
+            r'Low $\sigma$: MT $\gg$ EF $\gg$ SC' '\n'
+            r'High $\sigma$: all converge to $\sigma^2/2$',
+            transform=ax.transAxes, fontsize=7,
+            verticalalignment='top', horizontalalignment='left',
+            bbox=ANNOT_BOX)
+
     save_pdf(fig, 'fig6_effective_diffusion.pdf')
     print('  Fig 6: Effective diffusion')
 
@@ -351,8 +443,11 @@ def fig6():
 def fig7():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
+    sc_data = None
     for s in SCHEME_ORDER:
         _, arr = load_csv(f'mmatrix_sweep_{s}.csv')
+        if s == 'StandardCentral':
+            sc_data = arr
         ax1.semilogx(arr['sigma'], arr['lower'], color=COLORS[s],
                      ls=STYLES[s], label=LABELS[s])
         ax2.loglog(arr['sigma'], arr['upper'], color=COLORS[s],
@@ -364,6 +459,20 @@ def fig7():
     ax1.set_ylabel(r'Lower Off-Diagonal $a_{i,i-1}$')
     ax1.set_title('Lower Off-Diagonal')
     ax1.legend(fontsize=7)
+
+    # Find and annotate critical sigma where SC crosses zero
+    if sc_data is not None:
+        lower = sc_data['lower']
+        sigma = sc_data['sigma']
+        sign_changes = np.where(np.diff(np.sign(lower)))[0]
+        if len(sign_changes) > 0:
+            idx = sign_changes[0]
+            sig_crit = sigma[idx]
+            ax1.axvline(sig_crit, color='red', ls=':', lw=0.6, alpha=0.6)
+            ax1.text(sig_crit * 1.3, ax1.get_ylim()[1] * 0.3,
+                     f'SC: M-matrix\nviolated below\n'
+                     f'$\\sigma \\approx {sig_crit:.3f}$',
+                     fontsize=6.5, color='red', bbox=ANNOT_BOX)
 
     ax2.set_xlabel(r'Volatility $\sigma$')
     ax2.set_ylabel(r'Upper Off-Diagonal $a_{i,i+1}$')
@@ -384,8 +493,10 @@ def fig7():
 def fig8():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
+    last_arr = None
     for s in SCHEME_ORDER:
         _, arr = load_csv(f'benchmark_{s}.csv')
+        last_arr = arr
         ax1.loglog(arr['xGrid'], arr['relative_cost'],
                    color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
                    label=LABELS[s])
@@ -394,14 +505,30 @@ def fig8():
                    label=LABELS[s])
 
     ax1.set_xlabel(r'Grid Size ($N_x$)')
-    ax1.set_ylabel(r'Relative Cost ($N_x \times N_t$)')
+    ax1.set_ylabel(r'Work Units ($N_x \times N_t$)')
     ax1.set_title('Cost vs Grid Size')
     ax1.legend(fontsize=7)
 
-    ax2.set_xlabel(r'Relative Cost ($N_x \times N_t$)')
+    ax2.set_xlabel(r'Work Units ($N_x \times N_t$)')
     ax2.set_ylabel(r'$|V_{\mathrm{num}} - V_{\mathrm{BS}}|$')
     ax2.set_title('Cost-Accuracy Tradeoff')
     ax2.legend(fontsize=7)
+
+    # Data-grounded accuracy annotation from actual data
+    if last_arr is not None and 'wall_ms' in last_arr:
+        # Find error at N_x=200
+        idx_200 = np.argmin(np.abs(last_arr['xGrid'] - 200))
+        err_200 = last_arr['error'][idx_200]
+        ref_price = float(load_csv('benchmark_StandardCentral.csv')[0].get(
+            'reference_price', '9.227'))
+        rel_err = err_200 / ref_price * 100
+        wall_200 = last_arr['wall_ms'][idx_200]
+        ax2.text(0.98, 0.95,
+                 f'At $N_x=200$: {rel_err:.3f}% rel. error\n'
+                 f'Wall-clock: {wall_200:.1f} ms (median of 3)',
+                 transform=ax2.transAxes, fontsize=7,
+                 verticalalignment='top', horizontalalignment='right',
+                 bbox=ANNOT_BOX)
 
     fig.suptitle('Performance Benchmark: European Call', y=1.02)
     fig.tight_layout()
@@ -430,6 +557,21 @@ def fig9():
     ax.legend()
     ax.set_xlim(-20, 20)
     ax.set_ylim(0, 22)
+
+    # Regime labels
+    ax.text(-15, 16, 'Upwind\n(1st order)',
+            fontsize=8, ha='center', color='#555555',
+            bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
+                      alpha=0.7))
+    ax.text(0, 3, 'Taylor\n(central, 2nd order)',
+            fontsize=8, ha='center', color='#555555',
+            bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
+                      alpha=0.7))
+    ax.text(15, 16, 'Upwind\n(1st order)',
+            fontsize=8, ha='center', color='#555555',
+            bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
+                      alpha=0.7))
+
     save_pdf(fig, 'fig9_xcothx.pdf')
     print('  Fig 9: xCothx/Peclet')
 
