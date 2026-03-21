@@ -102,17 +102,17 @@ This avoids the 0/0 indeterminate form at x = 0 and overflow for large arguments
 
 The table below compares our FD scheme prices against the Monte Carlo reference at the 9 spot values from Table 1 of Milev-Tagliani (2010), "Nonstandard FD Schemes." All FD schemes are evaluated on a 4000-node log-space grid with FdmBlackScholesMesher; MC uses 10⁷ paths with standard errors shown.
 
-| S₀ | SC (CN) | EF (Duffy) | MT (CN Variant) | MC (10M paths) | MC SE |
-|---:|---:|---:|---:|---:|---:|
-| 95 | 0.17745 | 0.17745 | 0.17745 | 0.17398 | 0.00032 |
-| 95.0001 | 0.17745 | 0.17745 | 0.17745 | 0.17391 | 0.00032 |
-| 95.5 | 0.18367 | 0.18367 | 0.18367 | 0.18316 | 0.00033 |
-| 99.5 | 0.23082 | 0.23082 | 0.23082 | 0.22967 | 0.00037 |
-| 100 | 0.23406 | 0.23406 | 0.23406 | 0.23260 | 0.00037 |
-| 100.5 | 0.23658 | 0.23658 | 0.23658 | 0.23554 | 0.00038 |
-| 109.5 | 0.17573 | 0.17573 | 0.17573 | 0.17449 | 0.00033 |
-| 109.9999 | 0.16997 | 0.16997 | 0.16997 | 0.16813 | 0.00032 |
-| 110 | 0.16997 | 0.16997 | 0.16997 | 0.16722 | 0.00032 |
+| S₀ | SC (CN) | EF (Duffy) | MT (CN Var.) | MC (10M) | MC SE | |SC-MC| | |EF-MC| | |MT-MC| |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 95 | 0.17745 | 0.17745 | 0.17745 | 0.17398 | 0.00032 | 0.00347 | 0.00347 | 0.00347 |
+| 95.0001 | 0.17745 | 0.17745 | 0.17745 | 0.17391 | 0.00032 | 0.00355 | 0.00355 | 0.00355 |
+| 95.5 | 0.18367 | 0.18367 | 0.18367 | 0.18316 | 0.00033 | 0.00050 | 0.00050 | 0.00050 |
+| 99.5 | 0.23082 | 0.23082 | 0.23082 | 0.22967 | 0.00037 | 0.00115 | 0.00115 | 0.00115 |
+| 100 | 0.23406 | 0.23406 | 0.23406 | 0.23260 | 0.00037 | 0.00146 | 0.00146 | 0.00146 |
+| 100.5 | 0.23658 | 0.23658 | 0.23658 | 0.23554 | 0.00038 | 0.00104 | 0.00104 | 0.00104 |
+| 109.5 | 0.17573 | 0.17573 | 0.17573 | 0.17449 | 0.00033 | 0.00125 | 0.00125 | 0.00125 |
+| 109.9999 | 0.16997 | 0.16997 | 0.16997 | 0.16813 | 0.00032 | 0.00184 | 0.00184 | 0.00184 |
+| 110 | 0.16997 | 0.16997 | 0.16997 | 0.16722 | 0.00032 | 0.00274 | 0.00274 | 0.00274 |
 
 At σ = 0.25 (σ² = 0.0625 > r = 0.05), all three FD schemes agree to machine precision on the same mesh — as predicted by Theorem 3.1 in the paper, since the CN scheme is already well-conditioned. FD prices are systematically slightly above MC, consistent with grid convergence error. Compared to the paper's Table 1, our prices are higher by ~0.002–0.005 at the barriers (S = 95, 110) and closer at interior spots, reflecting the different spatial discretization (log-space with non-uniform mesher vs. uniform S-space with ΔS = 0.05).
 
@@ -120,7 +120,7 @@ At σ = 0.25 (σ² = 0.0625 > r = 0.05), all three FD schemes agree to machine p
 
 **Parameters:** K = 100, σ = 0.001, r = 0.05, L = 95, U = 110, T = 1.0, 5 monitoring dates. At σ = 0.001, the `FdmBlackScholesMesher` auto-domain collapses to roughly [99.6, 103.0] in spot-space, excluding both barriers. This experiment uses a `Uniform1dMesher` with explicit bounds [ln(80), ln(130)] to ensure the barriers are represented, matching the validated test pattern.
 
-**Results:** On the uniform log-mesh that includes both barriers, StandardCentral produces negative prices near the barriers — a direct M-matrix violation (37 negative grid nodes). ExponentialFitting and MilevTaglianiCN maintain positivity throughout. The Monte Carlo reference (5×10⁶ paths, 31 spots across [L, U]) is plotted alongside the FD curves in Figure 4.
+**Results:** On the uniform log-mesh that includes both barriers, StandardCentral produces negative prices near the barriers — a direct M-matrix violation (37 negative grid nodes). The negative-price region (V < 0) is shaded in Figure 4 to highlight these non-physical values. ExponentialFitting and MilevTaglianiCN maintain positivity throughout. The Monte Carlo reference (5×10⁶ paths, 31 spots across [L, U]) is plotted alongside the FD curves in Figure 4.
 
 **MT Limitation at Extreme Low Volatility:** While MilevTaglianiCN maintains positivity, it can exhibit visible undershoot near the barriers at σ = 0.001. The artificial diffusion term (1/8)(r/σ · ΔS)² grows as O(1/σ²) and can become very large relative to the true diffusion σ²/2. This introduces smoothing that flattens the price profile near the barriers. The paper's time-step constraint Δt < 1/(rM) becomes increasingly restrictive as M (the number of spatial nodes) grows. Accurate solutions at extreme low vol require sufficiently fine grids (small ΔS) to control the ratio r·ΔS/σ.
 
@@ -150,7 +150,7 @@ MT shows approximately 2.5× the error of SC/EF at coarse grids due to its first
 
 **Parameters:** Volatility sweep from σ = 0.001 to σ = 0.5 (50 log-spaced values), r = 0.05, q = 0, uniform log-mesh with 200 nodes, mMatrixPolicy = None (raw scheme behavior).
 
-**Results:** Figure 6 plots effective diffusion a_eff vs σ on log-log axes for all three schemes. At low σ (≤ 0.01), the schemes differ by orders of magnitude: MilevTaglianiCN >> ExponentialFitting >> StandardCentral. At high σ (≥ 0.2), all three converge as the base diffusion σ²/2 dominates. This illustrates the papers' core insight: nonstandard schemes add artificial diffusion precisely in the low-volatility regime where the standard scheme produces spurious oscillations.
+**Results:** Figure 6 plots effective diffusion a_eff vs σ on log-log axes for all three schemes. At low σ (≤ 0.01), the schemes differ by orders of magnitude: MilevTaglianiCN >> ExponentialFitting >> StandardCentral. At high σ (≥ 0.2), all three converge as the base diffusion σ²/2 dominates. A vertical line marks σ_* where the EF/SC effective-diffusion ratio drops below 2, indicating the transition from the diffusion-dominated regime (where the nonstandard schemes add significant artificial diffusion) to the convergent regime. This illustrates the papers' core insight: nonstandard schemes add artificial diffusion precisely in the low-volatility regime where the standard scheme produces spurious oscillations.
 
 Figure 7 shows the lower and upper off-diagonal entries of the operator matrix vs σ. The left subplot (lower off-diagonal) uses a symlog scale to accommodate both positive and negative values. StandardCentral's lower off-diagonal becomes negative below σ ≈ 0.02 — an M-matrix violation. ExponentialFitting and MilevTaglianiCN maintain non-negative lower off-diagonals across the entire σ range, confirming their M-matrix compliance.
 
@@ -162,7 +162,7 @@ Figure 7 shows the lower and upper off-diagonal entries of the operator matrix v
 
 ### Experiment 7: Péclet Number Dependence (Figure 9)
 
-**Results:** The fitting factor ρ = x·coth(x) smoothly transitions from ρ ≈ 1 (standard central) at low Pe to ρ ≈ |Pe| (upwind) at high Pe. The three-regime numerical implementation (Taylor, direct, asymptotic) provides seamless coverage. Figure 9 annotates the regime labels: "Taylor" near Pe = 0 where ρ ≈ 1 + Pe²/3 (second-order central differences), and "Upwind" at large |Pe| where the scheme degrades to first-order upwinding.
+**Results:** The fitting factor ρ = x·coth(x) smoothly transitions from ρ ≈ 1 (standard central) at low Pe to ρ ≈ |Pe| (asymptotic) at high Pe. The three-regime numerical implementation provides seamless coverage, with Figure 9 annotating each regime: "Taylor" near Pe = 0 where ρ ≈ 1 + Pe²/3 (|x| < 10⁻⁶), "Direct" in the moderate range where ρ = x·coth(x) is computed directly (10⁻⁶ ≤ |x| ≤ 50), and "Asymptotic" at large |Pe| where ρ ≈ |x| (|x| > 50).
 
 ## 5. Discussion
 

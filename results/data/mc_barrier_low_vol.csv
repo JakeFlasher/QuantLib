@@ -13,7 +13,7 @@
 # upper_barrier: 110
 # n_monitoring: 5
 # num_paths: 5000000
-# min_price_threshold: 0
+# min_price_threshold: none (all spots included)
 S0,price,standard_error,num_paths
 95,0.00438944841269429,8.08035750407543e-06,5000000
 95.5,0.377023378896259,4.27028682256496e-05,5000000

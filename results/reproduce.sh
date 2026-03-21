@@ -15,8 +15,9 @@ cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3
 cmake --build "$BUILD_DIR" --parallel 2>&1 | tail -3
 echo "      Build complete."
 
-# 2. Run the data generator
+# 2. Run the data generator (clean stale artifacts first)
 echo "[2/4] Generating experiment data..."
+rm -f "$DATA_DIR"/*.csv "$FIG_DIR"/*.pdf 2>/dev/null || true
 mkdir -p "$DATA_DIR" "$FIG_DIR"
 cd "$BUILD_DIR"
 LD_LIBRARY_PATH="${SCRIPT_DIR}/../build/ql:${LD_LIBRARY_PATH:-}" ./generate_data "$DATA_DIR"

@@ -341,7 +341,18 @@ def fig4():
     ax.text(U, ax.get_ylim()[1]*0.95, f' $U={int(U)}$', fontsize=7,
             va='top', color='gray')
 
-    # Annotation: negative price region explanation
+    # Shade the V < 0 region to highlight SC's non-physical negative prices
+    ylim = ax.get_ylim()
+    if ylim[0] < 0:
+        ax.axhspan(ylim[0], 0, color='red', alpha=0.08, zorder=0)
+        ax.text(0.02, 0.02,
+                'Shaded: SC negative prices\n(M-matrix violation)',
+                transform=ax.transAxes, fontsize=6.5,
+                verticalalignment='bottom', horizontalalignment='left',
+                color='red', bbox=dict(boxstyle='round,pad=0.2',
+                                       facecolor='mistyrose', alpha=0.8))
+
+    # Annotation: MT diffusion limitation
     ax.text(0.98, 0.55,
             r'MT undershoot at $\sigma^2 \ll r$:' '\n'
             r'artificial diffusion $\frac{1}{8}(\frac{r}{\sigma}\Delta S)^2$'
@@ -414,8 +425,10 @@ def fig5():
 
 def fig6():
     fig, ax = plt.subplots()
+    sweep_data = {}
     for s in SCHEME_ORDER:
         _, arr = load_csv(f'effective_diffusion_sweep_{s}.csv')
+        sweep_data[s] = arr
         ax.loglog(arr['sigma'], arr['a_eff'], color=COLORS[s], ls=STYLES[s],
                   label=LABELS[s])
 
@@ -424,7 +437,21 @@ def fig6():
     ax.set_title(r'Effective Diffusion vs Volatility ($\sigma$-Sweep)')
     ax.legend()
 
-    # Annotation: regime transition
+    # Find regime transition: sigma where EF/SC ratio drops below 2
+    # (i.e., where EF is no longer adding significant extra diffusion)
+    sc = sweep_data['StandardCentral']
+    ef = sweep_data['ExponentialFitting']
+    ratio = ef['a_eff'] / sc['a_eff']
+    trans_idx = np.where(ratio < 2.0)[0]
+    if len(trans_idx) > 0:
+        sigma_star = sc['sigma'][trans_idx[0]]
+        ax.axvline(sigma_star, color='gray', ls=':', lw=0.8, alpha=0.7)
+        ax.text(sigma_star * 1.3, ax.get_ylim()[0] * 3,
+                f'$\\sigma_* \\approx {sigma_star:.2f}$\n'
+                'EF/SC converge\n(ratio < 2)',
+                fontsize=6.5, color='#555555', bbox=ANNOT_BOX)
+
+    # Annotation: regime summary
     ax.text(0.03, 0.97,
             r'Low $\sigma$: MT $\gg$ EF $\gg$ SC' '\n'
             r'High $\sigma$: all converge to $\sigma^2/2$',
@@ -514,18 +541,18 @@ def fig8():
     ax2.set_title('Cost-Accuracy Tradeoff')
     ax2.legend(fontsize=7)
 
-    # Data-grounded accuracy annotation from actual data
-    if last_arr is not None and 'wall_ms' in last_arr:
-        # Find error at N_x=200
-        idx_200 = np.argmin(np.abs(last_arr['xGrid'] - 200))
-        err_200 = last_arr['error'][idx_200]
-        ref_price = float(load_csv('benchmark_StandardCentral.csv')[0].get(
-            'reference_price', '9.227'))
+    # Data-grounded accuracy annotation — use SC (representative, all identical)
+    sc_meta, sc_arr = load_csv('benchmark_StandardCentral.csv')
+    if 'wall_ms' in sc_arr:
+        idx_200 = np.argmin(np.abs(sc_arr['xGrid'] - 200))
+        err_200 = sc_arr['error'][idx_200]
+        ref_price = float(sc_meta.get('reference_price', '9.227'))
         rel_err = err_200 / ref_price * 100
-        wall_200 = last_arr['wall_ms'][idx_200]
+        wall_200 = sc_arr['wall_ms'][idx_200]
         ax2.text(0.98, 0.95,
-                 f'At $N_x=200$: {rel_err:.3f}% rel. error\n'
-                 f'Wall-clock: {wall_200:.1f} ms (median of 3)',
+                 f'SC at $N_x=200$: {rel_err:.3f}% rel. error\n'
+                 f'Wall-clock: {wall_200:.1f} ms (median of 3)\n'
+                 '(all schemes identical at this $\\sigma$)',
                  transform=ax2.transAxes, fontsize=7,
                  verticalalignment='top', horizontalalignment='right',
                  bbox=ANNOT_BOX)
@@ -558,16 +585,18 @@ def fig9():
     ax.set_xlim(-20, 20)
     ax.set_ylim(0, 22)
 
-    # Regime labels
-    ax.text(-15, 16, 'Upwind\n(1st order)',
+    # Implementation regime labels matching xCothx three-regime evaluation
+    # Taylor: |x| < xSmall (1e-6), Direct: xSmall <= |x| <= xLarge (50),
+    # Asymptotic: |x| > xLarge
+    ax.text(-15, 16, 'Asymptotic\n$\\rho \\approx |Pe|$',
             fontsize=8, ha='center', color='#555555',
             bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
                       alpha=0.7))
-    ax.text(0, 3, 'Taylor\n(central, 2nd order)',
+    ax.text(0, 3, 'Taylor\n$\\rho \\approx 1 + Pe^2/3$',
             fontsize=8, ha='center', color='#555555',
             bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
                       alpha=0.7))
-    ax.text(15, 16, 'Upwind\n(1st order)',
+    ax.text(8, 8, 'Direct\n$\\rho = x\\coth(x)$',
             fontsize=8, ha='center', color='#555555',
             bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
                       alpha=0.7))

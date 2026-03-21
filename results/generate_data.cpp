@@ -800,7 +800,7 @@ void runBarrierMC(const std::string& dataDir,
     csv.meta("num_paths", nPaths);
     // For low-vol, include all spots (zero prices are meaningful near barriers)
     Real minThreshold = (vol > 0.1) ? 0.01 : -1.0;
-    csv.meta("min_price_threshold", (vol > 0.1) ? Real(0.01) : Real(0.0));
+    csv.meta("min_price_threshold", (vol > 0.1) ? "0.01" : "none (all spots included)");
     csv.header("S0", "price", "standard_error", "num_paths");
 
     Real dt = T / nMonitoring;
