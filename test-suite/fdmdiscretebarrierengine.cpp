@@ -1285,6 +1285,22 @@ BOOST_AUTO_TEST_CASE(testDiscreteBarrierRejectsNonEuropeanExercise) {
         BOOST_CHECK_THROW(option.NPV(), Error);
     }
 
+    // Bermudan exercise should throw
+    {
+        std::vector<Date> bermudanDates;
+        bermudanDates.push_back(today + Period(3, Months));
+        bermudanDates.push_back(exerciseDate);
+        auto exercise = ext::make_shared<BermudanExercise>(bermudanDates);
+        BarrierOption option(Barrier::DownOut, 90.0, 0.0,
+                             payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, monDates, 50, 100, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        BOOST_CHECK_THROW(option.NPV(), Error);
+    }
+
     // European exercise should succeed
     {
         auto exercise = ext::make_shared<EuropeanExercise>(exerciseDate);
@@ -1365,8 +1381,9 @@ BOOST_AUTO_TEST_CASE(testValuationDateMonitoringKnockOut) {
             << expected << ", got " << value);
     }
 
-    // DownOut WITHOUT today: spot=85 outside barrier but no t=0 check
-    // should have non-trivial value (standard PDE rollback)
+    // DownOut WITHOUT today: spot=85 outside barrier but no t=0 check.
+    // The PDE starts from unmodified initial condition, so the value
+    // must differ from the immediate-rebate case.
     {
         BarrierOption option(Barrier::DownOut, barrier, rebate,
                              payoff, exercise);
@@ -1379,10 +1396,49 @@ BOOST_AUTO_TEST_CASE(testValuationDateMonitoringKnockOut) {
 
         BOOST_TEST_MESSAGE("  DownOut without t=0: NPV=" << value);
 
-        // Without t=0 monitoring, the PDE starts from unmodified
-        // initial condition, so the value should differ from the
-        // immediate knock-out case.
         BOOST_CHECK(std::isfinite(value));
+        BOOST_CHECK_MESSAGE(std::fabs(value - rebate) > 0.01,
+            "Without t=0 monitoring, value should differ from "
+            "immediate rebate " << rebate << ", got " << value);
+    }
+
+    // Spot INSIDE corridor with today as monitoring date: prices should
+    // match the non-t=0 baseline (t=0 check is a no-op when inside)
+    {
+        const Real insideSpot = 100.0;  // inside [90, infinity)
+        auto processInside = ext::make_shared<BlackScholesMertonProcess>(
+            Handle<Quote>(ext::make_shared<SimpleQuote>(insideSpot)),
+            Handle<YieldTermStructure>(flatRate(today, 0.0, dc)),
+            Handle<YieldTermStructure>(flatRate(today, 0.05, dc)),
+            Handle<BlackVolTermStructure>(flatVol(today, 0.25, dc)));
+
+        // With today in monitoring dates
+        BarrierOption optWith(Barrier::DownOut, barrier, rebate,
+                              payoff, exercise);
+        optWith.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                processInside, monDatesWithToday, 50, 200, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        // Without today
+        BarrierOption optWithout(Barrier::DownOut, barrier, rebate,
+                                 payoff, exercise);
+        optWithout.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                processInside, monDatesNoToday, 50, 200, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        const Real vWith = optWith.NPV();
+        const Real vWithout = optWithout.NPV();
+
+        BOOST_TEST_MESSAGE("  Inside corridor: with t=0="
+            << vWith << ", without t=0=" << vWithout);
+
+        BOOST_CHECK_MESSAGE(
+            std::fabs(vWith - vWithout) < 0.05,
+            "Spot inside corridor: with/without t=0 monitoring "
+            "should be similar. with=" << vWith
+            << ", without=" << vWithout);
     }
 
     // DownIn with today as monitoring date: spot=85 < barrier=90
@@ -1472,6 +1528,98 @@ BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
         BOOST_CHECK_MESSAGE(locs[i] > locs[i-1],
             "Mesh not strictly increasing at index " << i
             << ": " << locs[i-1] << " >= " << locs[i]);
+    }
+
+    // Test xMax boundary: critical point at upper domain edge
+    {
+        const Real U = 130.0;
+        const Real xMaxConstraint = std::log(U);
+
+        std::vector<std::tuple<Real, Real, bool>> cPts = {
+            {K, 0.1, true},
+            {U, 0.1, true}  // U is exactly at xMax
+        };
+
+        FdmBlackScholesMesher mesherMax(
+            xGrid, process, maturity, K,
+            Null<Real>(), xMaxConstraint, 0.0001, 1.5,
+            cPts);
+
+        const auto& locsMax = mesherMax.locations();
+        const Real targetMax = std::log(U);
+        bool foundMax = false;
+        for (Size i = 0; i < locsMax.size(); ++i) {
+            if (std::fabs(locsMax[i] - targetMax) < 1e-10) {
+                foundMax = true;
+                break;
+            }
+        }
+        BOOST_CHECK_MESSAGE(foundMax,
+            "Critical point at xMax boundary U=" << U
+            << " should be retained");
+    }
+
+    // Test boundary-only cPoint: single cPoint at xMin exercising
+    // the Concentrating1dMesher path (not uniform fallback)
+    {
+        std::vector<std::tuple<Real, Real, bool>> cPtsSingle = {
+            {L, 0.1, true}  // only cPoint, exactly at xMin
+        };
+
+        FdmBlackScholesMesher mesherSingle(
+            xGrid, process, maturity, K,
+            xMinConstraint, Null<Real>(), 0.0001, 1.5,
+            cPtsSingle);
+
+        const auto& locsSingle = mesherSingle.locations();
+
+        // Verify the cPoint is retained and mesh is valid
+        bool foundSingle = false;
+        for (Size i = 0; i < locsSingle.size(); ++i) {
+            if (std::fabs(locsSingle[i] - std::log(L)) < 1e-10) {
+                foundSingle = true;
+                break;
+            }
+        }
+        BOOST_CHECK_MESSAGE(foundSingle,
+            "Boundary-only cPoint should be retained when it is the "
+            "sole concentration point");
+
+        // Mesh must be strictly increasing
+        for (Size i = 1; i < locsSingle.size(); ++i) {
+            BOOST_CHECK_MESSAGE(locsSingle[i] > locsSingle[i-1],
+                "Single-cPoint mesh not strictly increasing at index "
+                << i);
+        }
+    }
+
+    // Test far-outside cPoint: a cPoint well below xMin should be
+    // filtered out (negative test)
+    {
+        const Real farBelow = 10.0;  // log(10) << xMin=log(90)
+
+        std::vector<std::tuple<Real, Real, bool>> cPtsFar = {
+            {K, 0.1, true},
+            {farBelow, 0.1, true}  // well outside domain
+        };
+
+        FdmBlackScholesMesher mesherFar(
+            xGrid, process, maturity, K,
+            xMinConstraint, Null<Real>(), 0.0001, 1.5,
+            cPtsFar);
+
+        const auto& locsFar = mesherFar.locations();
+        const Real farTarget = std::log(farBelow);
+        bool foundFar = false;
+        for (Size i = 0; i < locsFar.size(); ++i) {
+            if (std::fabs(locsFar[i] - farTarget) < 1e-10) {
+                foundFar = true;
+                break;
+            }
+        }
+        BOOST_CHECK_MESSAGE(!foundFar,
+            "Far-outside cPoint at S=" << farBelow
+            << " should be filtered out, but was found in mesh");
     }
 }
 

@@ -66,8 +66,8 @@ namespace QuantLib {
         // Tolerant time matching: use lower_bound and check both the
         // found element and its predecessor for closeness within a
         // relative tolerance.  This is more robust than exact
-        // binary_search when monitoring times are recomputed via
-        // different day-count conventions or rounding.
+        // binary_search when monitoring times suffer floating-point
+        // representation or rounding differences.
         {
             const Real tol = 1e-10;
             auto it = std::lower_bound(
@@ -76,14 +76,14 @@ namespace QuantLib {
             bool matched = false;
             if (it != monitoringTimes_.end()) {
                 const Real absDiff = std::fabs(*it - t);
-                const Real scale = std::max(std::fabs(t), 1.0);
+                const Real scale = std::max(std::fabs(*it), std::fabs(t));
                 if (absDiff <= tol * scale)
                     matched = true;
             }
             if (!matched && it != monitoringTimes_.begin()) {
                 --it;
                 const Real absDiff = std::fabs(*it - t);
-                const Real scale = std::max(std::fabs(t), 1.0);
+                const Real scale = std::max(std::fabs(*it), std::fabs(t));
                 if (absDiff <= tol * scale)
                     matched = true;
             }

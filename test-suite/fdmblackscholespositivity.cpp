@@ -1189,11 +1189,47 @@ BOOST_AUTO_TEST_CASE(testThetaAtFirstAccessor) {
     BOOST_CHECK_MESSAGE(std::isfinite(theta2),
         "thetaAt() after valueAt() returned non-finite value: " << theta2);
 
-    // After modifying the process, thetaAt should return updated value
+    // After modifying the process, thetaAt should return an updated
+    // (different) value reflecting recalculation
     spotQuote->setValue(setup.spot * 1.1);
     const Real theta3 = solver.thetaAt(setup.spot * 1.1);
     BOOST_CHECK_MESSAGE(std::isfinite(theta3),
         "thetaAt() after process change returned non-finite value: " << theta3);
+    BOOST_CHECK_MESSAGE(std::fabs(theta3 - theta1) > 1e-14,
+        "thetaAt() should return a different value after process change: "
+        "theta1=" << theta1 << ", theta3=" << theta3);
+
+    // Negative test: s <= 0 should not produce a finite result.
+    // log(0) = -inf and log(negative) = NaN, so interpolation at
+    // those values should not return a usable finite number.
+    {
+        bool caught = false;
+        try {
+            const Real badTheta = solver.thetaAt(0.0);
+            // If no exception, the result must be non-finite
+            BOOST_CHECK_MESSAGE(!std::isfinite(badTheta),
+                "thetaAt(0) should not produce a finite result, got "
+                << badTheta);
+        } catch (...) {
+            caught = true;
+        }
+        // Either an exception or non-finite result is acceptable
+        if (caught)
+            BOOST_TEST_MESSAGE("  thetaAt(0.0) threw (acceptable)");
+    }
+    {
+        bool caught = false;
+        try {
+            const Real badTheta = solver.thetaAt(-1.0);
+            BOOST_CHECK_MESSAGE(!std::isfinite(badTheta),
+                "thetaAt(-1) should not produce a finite result, got "
+                << badTheta);
+        } catch (...) {
+            caught = true;
+        }
+        if (caught)
+            BOOST_TEST_MESSAGE("  thetaAt(-1.0) threw (acceptable)");
+    }
 }
 
 
@@ -1236,8 +1272,10 @@ BOOST_AUTO_TEST_CASE(testCNGateCraigSneydAccepted) {
         setup.maturity, tGrid, 3  // 3 damping steps
     };
 
-    // CraigSneyd(0.5) + dampingSteps=0 + MT: should be accepted
-    // (produces MT-scheme results, not identical to ExponentialFitting)
+    // CraigSneyd(0.5) + dampingSteps=0 + MT: should be accepted.
+    // Proof of acceptance: MT values must DIFFER from ExpFit values,
+    // since at low vol the MT and ExpFit spatial coefficients diverge.
+    // If the gate silently fell back, they would be bit-identical.
     {
         FdmBlackScholesSolver solverMT(
             Handle<GeneralizedBlackScholesProcess>(setup.process),
@@ -1261,11 +1299,16 @@ BOOST_AUTO_TEST_CASE(testCNGateCraigSneydAccepted) {
         BOOST_CHECK(std::isfinite(vMT));
         BOOST_CHECK(std::isfinite(vFit));
 
-        // If MT were silently falling back to ExpFit, values would match.
-        // With CraigSneyd accepted, MT uses different spatial coefficients,
-        // so values should differ (unless by coincidence at this vol).
+        // Assert acceptance: MT and ExpFit produce different values
+        // because at sigma=0.001 the MT added diffusion is large
+        BOOST_CHECK_MESSAGE(std::fabs(vMT - vFit) > 0.01,
+            "CraigSneyd+MT should be accepted (not fallen back to "
+            "ExpFit). MT=" << vMT << ", ExpFit=" << vFit
+            << ", diff=" << std::fabs(vMT - vFit));
+
         BOOST_TEST_MESSAGE("  CraigSneyd+MT: " << vMT
-            << ", CraigSneyd+ExpFit: " << vFit);
+            << ", CraigSneyd+ExpFit: " << vFit
+            << " (diff=" << std::fabs(vMT - vFit) << ")");
     }
 
     // CN + dampingSteps > 0 + FailFast: should throw
@@ -1334,6 +1377,32 @@ BOOST_AUTO_TEST_CASE(testCNGateCraigSneydAccepted) {
         const Real vFit = solverFitted.valueAt(setup.spot);
 
         BOOST_CHECK_SMALL(std::fabs(vMT - vFit), 1e-10);
+    }
+
+    // Hundsdorfer + MT: should fall back to ExpFit
+    {
+        FdmBlackScholesSolver solverMT(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping,
+            FdmSchemeDesc::Hundsdorfer(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            milevTaglianiDesc());
+
+        FdmBlackScholesSolver solverFitted(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping,
+            FdmSchemeDesc::Hundsdorfer(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            fittedDesc());
+
+        const Real vMT = solverMT.valueAt(setup.spot);
+        const Real vFit = solverFitted.valueAt(setup.spot);
+
+        BOOST_CHECK_SMALL(std::fabs(vMT - vFit), 1e-10);
+        BOOST_TEST_MESSAGE("  Hundsdorfer+MT fallback: "
+            << vMT << " == ExpFit: " << vFit);
     }
 }
 
