@@ -556,6 +556,29 @@ BOOST_AUTO_TEST_CASE(testTruncatedCallNumericalDiffusion) {
     const Size skip = 5;
     const Real monoTol = 1e-10;
 
+    // Measure transition width near U: count grid nodes where the
+    // value drops from >0.5*peak to <0.01*peak within a window.
+    auto transitionWidth = [&](const Array& v) -> Size {
+        const Real xU = std::log(U);
+        Real peak = *std::max_element(v.begin(), v.end());
+        Size iStart = 0, iEnd = 0;
+        bool foundStart = false;
+        for (const auto& iter : *mesher->layout()) {
+            const Real x = mesher->location(iter, 0);
+            if (x > xU - 0.5 && x < xU + 0.5) {
+                if (!foundStart && v[iter.index()] > 0.5 * peak) {
+                    iStart = iter.index();
+                    foundStart = true;
+                }
+                if (foundStart && v[iter.index()] < 0.01 * peak) {
+                    iEnd = iter.index();
+                    break;
+                }
+            }
+        }
+        return (iEnd > iStart) ? iEnd - iStart : 0;
+    };
+
     // ---- StandardCentral + CN: expect oscillations ----
     Size violCentral = 0;
     {
@@ -608,30 +631,7 @@ BOOST_AUTO_TEST_CASE(testTruncatedCallNumericalDiffusion) {
         BOOST_TEST_MESSAGE("  ExpFit+CN: neg=" << negCount
             << ", monoViol=" << violFitted);
 
-        // Measure transition width near U=70:
-        // count nodes where value drops from >0.5*peak to <0.01*peak
-        const Real xU = std::log(U);
-        Real peak = 0.0;
-        for (Size i = 0; i < v.size(); ++i)
-            peak = std::max(peak, v[i]);
-
-        Size iStart = 0, iEnd = 0;
-        bool foundStart = false;
-        for (const auto& iter : *mesher->layout()) {
-            const Real x = mesher->location(iter, 0);
-            if (x > xU - 0.5 && x < xU + 0.5) {
-                if (!foundStart && v[iter.index()] > 0.5 * peak) {
-                    iStart = iter.index();
-                    foundStart = true;
-                }
-                if (foundStart && v[iter.index()] < 0.01 * peak) {
-                    iEnd = iter.index();
-                    break;
-                }
-            }
-        }
-        transWidthExpFit = (iEnd > iStart) ? iEnd - iStart : 0;
-
+        transWidthExpFit = transitionWidth(v);
         BOOST_TEST_MESSAGE("  ExpFit+CN: transition_width="
             << transWidthExpFit << " nodes");
     }
@@ -659,29 +659,7 @@ BOOST_AUTO_TEST_CASE(testTruncatedCallNumericalDiffusion) {
         BOOST_TEST_MESSAGE("  MT+CN: neg=" << negCount
             << ", monoViol=" << violMT);
 
-        // Measure transition width
-        const Real xU = std::log(U);
-        Real peak = 0.0;
-        for (Size i = 0; i < v.size(); ++i)
-            peak = std::max(peak, v[i]);
-
-        Size iStart = 0, iEnd = 0;
-        bool foundStart = false;
-        for (const auto& iter : *mesher->layout()) {
-            const Real x = mesher->location(iter, 0);
-            if (x > xU - 0.5 && x < xU + 0.5) {
-                if (!foundStart && v[iter.index()] > 0.5 * peak) {
-                    iStart = iter.index();
-                    foundStart = true;
-                }
-                if (foundStart && v[iter.index()] < 0.01 * peak) {
-                    iEnd = iter.index();
-                    break;
-                }
-            }
-        }
-        transWidthMT = (iEnd > iStart) ? iEnd - iStart : 0;
-
+        transWidthMT = transitionWidth(v);
         BOOST_TEST_MESSAGE("  MT+CN: transition_width="
             << transWidthMT << " nodes");
     }

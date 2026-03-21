@@ -186,9 +186,7 @@ BOOST_AUTO_TEST_CASE(testDiscreteBarrierRebate) {
     BOOST_TEST_MESSAGE(
         "Testing discrete barrier step condition with non-zero rebate...");
 
-    
     const Size xGrid = 800;
-    const Size tGrid = 200;
     const Real xMin = std::log(50.0);
     const Real xMax = std::log(200.0);
     const Real L = 80.0;
@@ -286,31 +284,25 @@ BOOST_AUTO_TEST_CASE(testDoubleBarrierKnockOutPaperExample) {
 
     const FdmBoundaryConditionSet bcSet;
 
-    // ---- Run with ExponentialFitting + CN ----
-    {
-        FdmBlackScholesSpatialDesc desc = fittedDesc();
-
+    // ---- Run with ExponentialFitting + CN, then MilevTagliani + CN ----
+    struct SchemeCase { FdmBlackScholesSpatialDesc desc; const char* name; };
+    for (const auto& sc : {SchemeCase{fittedDesc(), "ExpFit+CN"},
+                           SchemeCase{milevTaglianiDesc(), "MT+CN"}}) {
         auto op = ext::make_shared<FdmBlackScholesOp>(
             mesher, process, K,
             false, -Null<Real>(), Size(0),
-            ext::shared_ptr<FdmQuantoHelper>(), desc);
+            ext::shared_ptr<FdmQuantoHelper>(), sc.desc);
 
-        FdmSolverDesc solverDesc = {
-            mesher, bcSet, conditions, calculator,
-            maturity, tGrid, 0
-        };
-
+        Array rhs = buildPayoff(mesher, payoff);
         FdmBackwardSolver solver(
             op, bcSet, conditions,
             FdmSchemeDesc::CrankNicolson());
-        
-        Array rhs = buildPayoff(mesher, payoff);
         solver.rollback(rhs, maturity, 0.0, tGrid, 0);
 
         const Real price95  = valueAtSpot(rhs, mesher, 95.0);
         const Real price100 = valueAtSpot(rhs, mesher, 100.0);
 
-        BOOST_TEST_MESSAGE("  ExpFit+CN: V(95)="  << price95
+        BOOST_TEST_MESSAGE("  " << sc.name << ": V(95)="  << price95
                            << ", V(100)=" << price100);
 
         // Prices must be positive
@@ -319,41 +311,8 @@ BOOST_AUTO_TEST_CASE(testDoubleBarrierKnockOutPaperExample) {
         BOOST_CHECK_MESSAGE(price100 >= -1e-10,
             "Negative price at S=100: " << price100);
 
-        // Paper MC: V(95)≈0.174, V(100)≈0.233
+        // Paper MC: V(95)~0.174, V(100)~0.233
         // Tolerance generous due to log-space vs S-space difference
-        BOOST_CHECK_MESSAGE(price95 > 0.10 && price95 < 0.30,
-            "V(95) out of expected range: " << price95);
-        BOOST_CHECK_MESSAGE(price100 > 0.15 && price100 < 0.35,
-            "V(100) out of expected range: " << price100);
-    }
-
-    // ---- Run with MilevTagliani + CN ----
-    {
-        FdmBlackScholesSpatialDesc desc = milevTaglianiDesc();
-
-        auto op = ext::make_shared<FdmBlackScholesOp>(
-            mesher, process, K,
-            false, -Null<Real>(), Size(0),
-            ext::shared_ptr<FdmQuantoHelper>(), desc);
-
-        Array rhs = buildPayoff(mesher, payoff);
-
-        FdmBackwardSolver solver(
-            op, bcSet, conditions,
-            FdmSchemeDesc::CrankNicolson());
-        solver.rollback(rhs, maturity, 0.0, tGrid, 0);
-
-        const Real price95  = valueAtSpot(rhs, mesher, 95.0);
-        const Real price100 = valueAtSpot(rhs, mesher, 100.0);
-
-        BOOST_TEST_MESSAGE("  MT+CN: V(95)="  << price95
-                           << ", V(100)=" << price100);
-
-        BOOST_CHECK_MESSAGE(price95 >= -1e-10,
-            "Negative price at S=95: " << price95);
-        BOOST_CHECK_MESSAGE(price100 >= -1e-10,
-            "Negative price at S=100: " << price100);
-
         BOOST_CHECK_MESSAGE(price95 > 0.10 && price95 < 0.30,
             "V(95) out of expected range: " << price95);
         BOOST_CHECK_MESSAGE(price100 > 0.15 && price100 < 0.35,
@@ -1141,44 +1100,29 @@ BOOST_AUTO_TEST_CASE(testContinuousBarrierNonRegression) {
 
     BOOST_TEST_MESSAGE("  Analytical DownOut: NPV=" << refValue);
 
-    // FD with StandardCentral
-    {
+    // FD with StandardCentral and ExponentialFitting
+    struct DescCase {
+        FdmBlackScholesSpatialDesc desc; const char* name;
+    };
+    for (const auto& dc : {
+            DescCase{FdmBlackScholesSpatialDesc::standard(), "Central"},
+            DescCase{FdmBlackScholesSpatialDesc::exponentialFitting(),
+                     "ExpFit"}}) {
         BarrierOption option(Barrier::DownOut, barrier, 0.0,
                              payoff, exercise);
         option.setPricingEngine(
             ext::make_shared<FdBlackScholesBarrierEngine>(
                 process, 200, 800, 0,
                 FdmSchemeDesc::CrankNicolson(),
-                false, -Null<Real>(),
-                FdmBlackScholesSpatialDesc::standard()));
+                false, -Null<Real>(), dc.desc));
 
         const Real fdValue = option.NPV();
         const Real relErr = std::fabs(fdValue - refValue) / refValue;
 
-        BOOST_TEST_MESSAGE("  Central: NPV=" << fdValue
+        BOOST_TEST_MESSAGE("  " << dc.name << ": NPV=" << fdValue
             << " (err=" << relErr * 100 << "%)");
         BOOST_CHECK_MESSAGE(relErr < 0.02,
-            "Central barrier error " << relErr << " exceeds 2%");
-    }
-
-    // FD with ExponentialFitting
-    {
-        BarrierOption option(Barrier::DownOut, barrier, 0.0,
-                             payoff, exercise);
-        option.setPricingEngine(
-            ext::make_shared<FdBlackScholesBarrierEngine>(
-                process, 200, 800, 0,
-                FdmSchemeDesc::CrankNicolson(),
-                false, -Null<Real>(),
-                FdmBlackScholesSpatialDesc::exponentialFitting()));
-
-        const Real fdValue = option.NPV();
-        const Real relErr = std::fabs(fdValue - refValue) / refValue;
-
-        BOOST_TEST_MESSAGE("  ExpFit: NPV=" << fdValue
-            << " (err=" << relErr * 100 << "%)");
-        BOOST_CHECK_MESSAGE(relErr < 0.02,
-            "ExpFit barrier error " << relErr << " exceeds 2%");
+            dc.name << " barrier error " << relErr << " exceeds 2%");
     }
 }
 
