@@ -7,8 +7,6 @@ results/figures/.  Validates CSV metadata before plotting.
 Requires: matplotlib, numpy.
 """
 
-import csv
-import os
 import sys
 from pathlib import Path
 
@@ -119,6 +117,14 @@ def to_float_arrays(header, data):
     return arrays
 
 
+def load_csv(filename, validate=True):
+    """Read CSV, optionally validate metadata, return (meta, arrays)."""
+    meta, header, data = read_csv(filename)
+    if validate:
+        validate_meta(filename, meta)
+    return meta, to_float_arrays(header, data)
+
+
 def save_pdf(fig, name):
     """Save figure as PDF without timestamp metadata."""
     path = FIG_DIR / name
@@ -131,13 +137,8 @@ def save_pdf(fig, name):
 # ---------------------------------------------------------------------------
 
 def fig1():
-    sc_meta, sc_h, sc_d = read_csv('truncated_call_StandardCentral.csv')
-    validate_meta('truncated_call_StandardCentral.csv', sc_meta)
-    sc = to_float_arrays(sc_h, sc_d)
-
-    ref_meta, ref_h, ref_d = read_csv('truncated_call_reference.csv')
-    validate_meta('truncated_call_reference.csv', ref_meta)
-    ref = to_float_arrays(ref_h, ref_d)
+    sc_meta, sc = load_csv('truncated_call_StandardCentral.csv')
+    ref_meta, ref = load_csv('truncated_call_reference.csv')
 
     fig, ax = plt.subplots()
     ax.plot(sc['S'], sc['price'], color=COLORS['StandardCentral'],
@@ -167,12 +168,9 @@ def fig1():
 def fig2():
     schemes = {}
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'truncated_call_{s}.csv')
-        validate_meta(f'truncated_call_{s}.csv', m)
-        schemes[s] = to_float_arrays(h, d)
+        _, schemes[s] = load_csv(f'truncated_call_{s}.csv')
 
-    ref_meta, ref_h, ref_d = read_csv('truncated_call_reference.csv')
-    ref = to_float_arrays(ref_h, ref_d)
+    ref_meta, ref = load_csv('truncated_call_reference.csv')
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4),
                                      gridspec_kw={'width_ratios': [2, 1]})
@@ -219,9 +217,7 @@ def fig3():
     fig, ax = plt.subplots()
     first_meta = None
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'barrier_moderate_vol_{s}.csv')
-        validate_meta(f'barrier_moderate_vol_{s}.csv', m)
-        arr = to_float_arrays(h, d)
+        m, arr = load_csv(f'barrier_moderate_vol_{s}.csv')
         if first_meta is None:
             first_meta = m
         L = float(m['lower_barrier'])
@@ -232,9 +228,8 @@ def fig3():
 
     # Fine-grid reference
     try:
-        ref_m, ref_h, ref_d = read_csv(
+        _, ref = load_csv(
             'barrier_moderate_vol_reference_ExponentialFitting.csv')
-        ref = to_float_arrays(ref_h, ref_d)
         mask_r = (ref['S'] >= L - 1) & (ref['S'] <= U + 1)
         ax.plot(ref['S'][mask_r], ref['price'][mask_r],
                 color=COLORS['reference'], ls=STYLES['reference'], lw=0.8,
@@ -244,8 +239,7 @@ def fig3():
 
     # MC reference
     try:
-        mc_m, mc_h, mc_d = read_csv('mc_barrier_moderate_vol.csv')
-        mc = to_float_arrays(mc_h, mc_d)
+        _, mc = load_csv('mc_barrier_moderate_vol.csv', validate=False)
         ax.errorbar(mc['S0'], mc['price'], yerr=2*mc['standard_error'],
                      fmt='o', color=COLORS['MC'], ms=3, lw=0.8,
                      capsize=2, label=LABELS['MC'])
@@ -273,9 +267,7 @@ def fig4():
     fig, ax = plt.subplots()
     first_meta = None
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'barrier_low_vol_{s}.csv')
-        validate_meta(f'barrier_low_vol_{s}.csv', m)
-        arr = to_float_arrays(h, d)
+        m, arr = load_csv(f'barrier_low_vol_{s}.csv')
         if first_meta is None:
             first_meta = m
         L = float(m['lower_barrier'])
@@ -286,8 +278,7 @@ def fig4():
 
     # MC reference (low-vol)
     try:
-        mc_m, mc_h, mc_d = read_csv('mc_barrier_low_vol.csv')
-        mc = to_float_arrays(mc_h, mc_d)
+        _, mc = load_csv('mc_barrier_low_vol.csv', validate=False)
         ax.errorbar(mc['S0'], mc['price'], yerr=2*mc['standard_error'],
                      fmt='o', color=COLORS['MC'], ms=3, lw=0.8,
                      capsize=2, label=LABELS['MC'])
@@ -315,9 +306,7 @@ def fig4():
 def fig5():
     fig, ax = plt.subplots()
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'grid_convergence_{s}.csv')
-        validate_meta(f'grid_convergence_{s}.csv', m)
-        arr = to_float_arrays(h, d)
+        _, arr = load_csv(f'grid_convergence_{s}.csv')
         ax.loglog(arr['xGrid'], arr['error'],
                   color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
                   label=LABELS[s])
@@ -343,9 +332,7 @@ def fig5():
 def fig6():
     fig, ax = plt.subplots()
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'effective_diffusion_sweep_{s}.csv')
-        validate_meta(f'effective_diffusion_sweep_{s}.csv', m)
-        arr = to_float_arrays(h, d)
+        _, arr = load_csv(f'effective_diffusion_sweep_{s}.csv')
         ax.loglog(arr['sigma'], arr['a_eff'], color=COLORS[s], ls=STYLES[s],
                   label=LABELS[s])
 
@@ -365,9 +352,7 @@ def fig7():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'mmatrix_sweep_{s}.csv')
-        validate_meta(f'mmatrix_sweep_{s}.csv', m)
-        arr = to_float_arrays(h, d)
+        _, arr = load_csv(f'mmatrix_sweep_{s}.csv')
         ax1.semilogx(arr['sigma'], arr['lower'], color=COLORS[s],
                      ls=STYLES[s], label=LABELS[s])
         ax2.loglog(arr['sigma'], arr['upper'], color=COLORS[s],
@@ -400,9 +385,7 @@ def fig8():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'benchmark_{s}.csv')
-        validate_meta(f'benchmark_{s}.csv', m)
-        arr = to_float_arrays(h, d)
+        _, arr = load_csv(f'benchmark_{s}.csv')
         ax1.loglog(arr['xGrid'], arr['relative_cost'],
                    color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
                    label=LABELS[s])
@@ -431,9 +414,7 @@ def fig8():
 # ---------------------------------------------------------------------------
 
 def fig9():
-    m, h, d = read_csv('xcothx.csv')
-    # xcothx has N/A for solver fields — skip strict validation
-    arr = to_float_arrays(h, d)
+    _, arr = load_csv('xcothx.csv', validate=False)
 
     fig, ax = plt.subplots()
     ax.plot(arr['Pe'], arr['xCothx'], color=COLORS['ExponentialFitting'],

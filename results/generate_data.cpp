@@ -10,9 +10,7 @@
  */
 
 #include <ql/qldefines.hpp>
-#include <ql/exercise.hpp>
 #include <ql/instruments/payoffs.hpp>
-#include <ql/instruments/vanillaoption.hpp>
 #include <ql/math/distributions/normaldistribution.hpp>
 #include <ql/math/matrixutilities/sparsematrix.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
@@ -22,16 +20,12 @@
 #include <ql/methods/finitedifferences/operators/fdmblackscholesspatialdesc.hpp>
 #include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
 #include <ql/methods/finitedifferences/operators/fdmhyperboliccot.hpp>
-#include <ql/methods/finitedifferences/operators/firstderivativeop.hpp>
-#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
-#include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
 #include <ql/methods/finitedifferences/stepconditions/fdmdiscretebarrierstepcondition.hpp>
 #include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
 #include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
-#include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
 #include <ql/processes/blackscholesprocess.hpp>
 #include <ql/quotes/simplequote.hpp>
 #include <ql/settings.hpp>
@@ -41,20 +35,27 @@
 #include <ql/time/daycounters/actual365fixed.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <list>
-#include <numeric>
 #include <random>
-#include <sstream>
 #include <string>
 #include <vector>
 
 using namespace QuantLib;
+
+using Scheme = FdmBlackScholesSpatialDesc::Scheme;
+using Policy = FdmBlackScholesSpatialDesc::MMatrixPolicy;
+
+static const Scheme ALL_SCHEMES[] = {
+    Scheme::StandardCentral,
+    Scheme::ExponentialFitting,
+    Scheme::MilevTaglianiCNEffectiveDiffusion
+};
 
 // =====================================================================
 // CSV writer with metadata
@@ -80,36 +81,18 @@ class CsvWriter {
         ofs_ << "# " << key << ": " << value << "\n";
     }
 
-    template <typename... Args>
-    void header(Args&&... cols) {
-        writeRow(std::forward<Args>(cols)...);
+    template <typename T, typename... Rest>
+    void row(const T& first, Rest&&... rest) {
+        ofs_ << first;
+        ((ofs_ << "," << rest), ...);
+        ofs_ << "\n";
     }
 
     template <typename... Args>
-    void row(Args&&... vals) {
-        writeRow(std::forward<Args>(vals)...);
-    }
+    void header(Args&&... cols) { row(std::forward<Args>(cols)...); }
 
   private:
     std::ofstream ofs_;
-
-    template <typename T>
-    void writeOne(const T& v) { ofs_ << v; }
-
-    void writeOne(Real v) { ofs_ << v; }
-
-    template <typename T, typename... Rest>
-    void writeRow(const T& first, Rest&&... rest) {
-        writeOne(first);
-        ((ofs_ << "," , writeOne(rest)), ...);
-        ofs_ << "\n";
-    }
-
-    template <typename T>
-    void writeRow(const T& only) {
-        writeOne(only);
-        ofs_ << "\n";
-    }
 };
 
 // =====================================================================
@@ -130,38 +113,17 @@ makeProcess(Real spot, Rate r, Rate q, Volatility vol) {
             ext::make_shared<BlackConstantVol>(today, NullCalendar(), vol, dc)));
 }
 
-static std::string schemeName(FdmBlackScholesSpatialDesc::Scheme s) {
+static std::string schemeName(Scheme s) {
     switch (s) {
-      case FdmBlackScholesSpatialDesc::Scheme::StandardCentral:
-        return "StandardCentral";
-      case FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting:
-        return "ExponentialFitting";
-      case FdmBlackScholesSpatialDesc::Scheme::MilevTaglianiCNEffectiveDiffusion:
-        return "MilevTaglianiCN";
-      default:
-        return "Unknown";
-    }
-}
-
-static std::string policyName(FdmBlackScholesSpatialDesc::MMatrixPolicy p) {
-    switch (p) {
-      case FdmBlackScholesSpatialDesc::MMatrixPolicy::None:
-        return "None";
-      case FdmBlackScholesSpatialDesc::MMatrixPolicy::DiagnosticsOnly:
-        return "DiagnosticsOnly";
-      case FdmBlackScholesSpatialDesc::MMatrixPolicy::FailFast:
-        return "FailFast";
-      case FdmBlackScholesSpatialDesc::MMatrixPolicy::FallbackToExponentialFitting:
-        return "FallbackToExponentialFitting";
-      default:
-        return "Unknown";
+      case Scheme::StandardCentral:           return "StandardCentral";
+      case Scheme::ExponentialFitting:        return "ExponentialFitting";
+      case Scheme::MilevTaglianiCNEffectiveDiffusion: return "MilevTaglianiCN";
+      default:                                return "Unknown";
     }
 }
 
 static FdmBlackScholesSpatialDesc descForScheme(
-        FdmBlackScholesSpatialDesc::Scheme s,
-        FdmBlackScholesSpatialDesc::MMatrixPolicy policy =
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::None) {
+        Scheme s, Policy policy = Policy::None) {
     FdmBlackScholesSpatialDesc d;
     d.scheme = s;
     d.mMatrixPolicy = policy;
@@ -270,18 +232,13 @@ void runTruncatedCall(const std::string& dataDir) {
     auto process = makeProcess(spot, r, q, vol);
     auto payoff = ext::make_shared<TruncatedCallPayoff>(K, U);
 
-    using Scheme = FdmBlackScholesSpatialDesc::Scheme;
-    Scheme schemes[] = {Scheme::StandardCentral,
-                        Scheme::ExponentialFitting,
-                        Scheme::MilevTaglianiCNEffectiveDiffusion};
-
     auto mesher = ext::make_shared<FdmMesherComposite>(
         ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
 
     const Array locs = mesher->locations(0);
 
-    for (Size s = 0; s < 3; ++s) {
-        auto desc = descForScheme(schemes[s]);
+    for (auto scheme : ALL_SCHEMES) {
+        auto desc = descForScheme(scheme);
         auto calc = ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
         auto conditions = ext::make_shared<FdmStepConditionComposite>(
             std::list<std::vector<Time>>(),
@@ -298,7 +255,7 @@ void runTruncatedCall(const std::string& dataDir) {
             false, -Null<Real>(),
             Handle<FdmQuantoHelper>(), desc);
 
-        std::string schName = schemeName(schemes[s]);
+        std::string schName = schemeName(scheme);
         CsvWriter csv(dataDir + "/truncated_call_" + schName + ".csv");
         writeStandardMeta(csv, schName, schName,
                           xGrid, tGrid, r, q, vol, K, T,
@@ -325,7 +282,7 @@ void runTruncatedCall(const std::string& dataDir) {
             FdmStepConditionComposite::Conditions());
         auto fineDesc = descForScheme(
             Scheme::ExponentialFitting,
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::FallbackToExponentialFitting);
+            Policy::FallbackToExponentialFitting);
 
         FdmSolverDesc fineSolverDesc = {
             fineMesher, FdmBoundaryConditionSet(), fineCond,
@@ -356,6 +313,35 @@ void runTruncatedCall(const std::string& dataDir) {
     std::cout << " done.\n";
 }
 
+// Helper: build a BS FDM solver on a FdmBlackScholesMesher and return
+// the price at the given spot.
+static Real solveEuropean(
+        const ext::shared_ptr<GeneralizedBlackScholesProcess>& process,
+        const ext::shared_ptr<StrikedTypePayoff>& payoff,
+        const FdmBlackScholesSpatialDesc& desc,
+        Real K, Time T, Size xGrid, Size tGrid, Real spot) {
+    auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
+        xGrid, process, T, K);
+    auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
+    auto calc = ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+    auto conditions = ext::make_shared<FdmStepConditionComposite>(
+        std::list<std::vector<Time>>(),
+        FdmStepConditionComposite::Conditions());
+
+    FdmSolverDesc solverDesc = {
+        mesher, FdmBoundaryConditionSet(), conditions,
+        calc, T, tGrid, 0};
+
+    FdmBlackScholesSolver solver(
+        Handle<GeneralizedBlackScholesProcess>(process),
+        K, solverDesc,
+        FdmSchemeDesc::CrankNicolson(),
+        false, -Null<Real>(),
+        Handle<FdmQuantoHelper>(), desc);
+
+    return solver.valueAt(spot);
+}
+
 // =====================================================================
 // Experiment 5: Grid convergence (Fig 5)
 // =====================================================================
@@ -373,18 +359,13 @@ void runGridConvergence(const std::string& dataDir) {
     const Real refPrice = bsCall(spot, K, r, q, vol, T);
     auto process = makeProcess(spot, r, q, vol);
 
-    using Scheme = FdmBlackScholesSpatialDesc::Scheme;
-    Scheme schemes[] = {Scheme::StandardCentral,
-                        Scheme::ExponentialFitting,
-                        Scheme::MilevTaglianiCNEffectiveDiffusion};
-
     Size grids[] = {25, 50, 100, 200, 400, 800, 1600};
 
     ext::shared_ptr<StrikedTypePayoff> payoff(
         new PlainVanillaPayoff(Option::Call, K));
 
-    for (Size si = 0; si < 3; ++si) {
-        std::string schName = schemeName(schemes[si]);
+    for (auto scheme : ALL_SCHEMES) {
+        std::string schName = schemeName(scheme);
         CsvWriter csv(dataDir + "/grid_convergence_" + schName + ".csv");
         writeStandardMeta(csv, schName, schName,
                           Size(0), Size(0), r, q, vol, K, T,
@@ -393,31 +374,11 @@ void runGridConvergence(const std::string& dataDir) {
         csv.meta("reference_price", refPrice);
         csv.header("xGrid", "tGrid", "price", "error");
 
+        auto desc = descForScheme(scheme);
         for (Size xGrid : grids) {
             Size tGrid = 4 * xGrid;
-
-            auto desc = descForScheme(schemes[si]);
-            auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
-                xGrid, process, T, K);
-            auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
-            auto calc = ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
-            auto conditions = ext::make_shared<FdmStepConditionComposite>(
-                std::list<std::vector<Time>>(),
-                FdmStepConditionComposite::Conditions());
-
-            FdmSolverDesc solverDesc = {
-                mesher, FdmBoundaryConditionSet(), conditions,
-                calc, T, tGrid, 0};
-
-            FdmBlackScholesSolver solver(
-                Handle<GeneralizedBlackScholesProcess>(process),
-                K, solverDesc,
-                FdmSchemeDesc::CrankNicolson(),
-                false, -Null<Real>(),
-                Handle<FdmQuantoHelper>(), desc);
-
-            Real price = solver.valueAt(spot);
-
+            Real price = solveEuropean(process, payoff, desc,
+                                       K, T, xGrid, tGrid, spot);
             csv.row(xGrid, tGrid,
                     price, std::fabs(price - refPrice));
         }
@@ -455,11 +416,29 @@ static void writeSweepMeta(CsvWriter& csv,
 }
 
 // =====================================================================
-// Experiment 6: Effective diffusion σ-sweep (Fig 6)
+// Shared σ-sweep infrastructure for Experiments 6 & 7
 // =====================================================================
 
-void runEffectiveDiffusionSweep(const std::string& dataDir) {
-    std::cout << "  Running effective diffusion sweep..." << std::flush;
+static std::vector<Volatility> logSpacedSigmas(Volatility sigmaMin,
+                                                Volatility sigmaMax,
+                                                Size n) {
+    std::vector<Volatility> v(n);
+    for (Size i = 0; i < n; ++i) {
+        Real t = Real(i) / Real(n - 1);
+        v[i] = sigmaMin * std::pow(sigmaMax / sigmaMin, t);
+    }
+    return v;
+}
+
+using SweepRowWriter = std::function<void(CsvWriter&, Volatility,
+                                          const SparseMatrix&, Size, Real)>;
+
+static void runSigmaSweep(const std::string& dataDir,
+                           const std::string& filePrefix,
+                           const std::string& label,
+                           const std::function<void(CsvWriter&, Real)>& writeMeta,
+                           const SweepRowWriter& writeRow) {
+    std::cout << "  Running " << label << "..." << std::flush;
 
     const Real spot = 100.0;
     const Rate r = 0.05;
@@ -478,34 +457,22 @@ void runEffectiveDiffusionSweep(const std::string& dataDir) {
     const Volatility sigmaMax = 0.5;
     const Size nSigma = 50;
 
-    // Log-spaced σ values
-    std::vector<Volatility> sigmas(nSigma);
-    for (Size i = 0; i < nSigma; ++i) {
-        Real t = Real(i) / Real(nSigma - 1);
-        sigmas[i] = sigmaMin * std::pow(sigmaMax / sigmaMin, t);
-    }
+    auto sigmas = logSpacedSigmas(sigmaMin, sigmaMax, nSigma);
 
-    using Scheme = FdmBlackScholesSpatialDesc::Scheme;
-    using Policy = FdmBlackScholesSpatialDesc::MMatrixPolicy;
-    Scheme schemes[] = {Scheme::StandardCentral,
-                        Scheme::ExponentialFitting,
-                        Scheme::MilevTaglianiCNEffectiveDiffusion};
-
-    for (Size si = 0; si < 3; ++si) {
-        std::string schName = schemeName(schemes[si]);
-        CsvWriter csv(dataDir + "/effective_diffusion_sweep_" + schName + ".csv");
+    for (auto scheme : ALL_SCHEMES) {
+        std::string schName = schemeName(scheme);
+        CsvWriter csv(dataDir + "/" + filePrefix + schName + ".csv");
         writeSweepMeta(csv, schName, schName,
                        xGrid, Size(0), r, q,
                        sigmaMin, sigmaMax, nSigma,
                        K, T, "None", "Uniform1dMesher");
-        csv.meta("h", h);
-        csv.header("sigma", "a_eff", "a_base", "ratio");
+        writeMeta(csv, h);
 
         for (Size j = 0; j < nSigma; ++j) {
             auto proc = makeProcess(spot, r, q, sigmas[j]);
             auto mesher = ext::make_shared<FdmMesherComposite>(
                 ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
-            auto desc = descForScheme(schemes[si], Policy::None);
+            auto desc = descForScheme(scheme, Policy::None);
             auto op = ext::make_shared<FdmBlackScholesOp>(
                 mesher, proc, K,
                 false, -Null<Real>(), 0,
@@ -513,12 +480,7 @@ void runEffectiveDiffusionSweep(const std::string& dataDir) {
             op->setTime(0.0, dt);
             SparseMatrix mat = op->toMatrix();
 
-            Real lower = Real(mat(midNode, midNode - 1));
-            Real upper = Real(mat(midNode, midNode + 1));
-            Real aEff = (lower + upper) * h * h / 2.0;
-            Real aBase = sigmas[j] * sigmas[j] / 2.0;
-            csv.row(sigmas[j], aEff, aBase,
-                    aBase > 0.0 ? aEff / aBase : 0.0);
+            writeRow(csv, sigmas[j], mat, midNode, h);
         }
     }
 
@@ -526,69 +488,45 @@ void runEffectiveDiffusionSweep(const std::string& dataDir) {
 }
 
 // =====================================================================
+// Experiment 6: Effective diffusion σ-sweep (Fig 6)
+// =====================================================================
+
+void runEffectiveDiffusionSweep(const std::string& dataDir) {
+    runSigmaSweep(
+        dataDir, "effective_diffusion_sweep_",
+        "effective diffusion sweep",
+        [](CsvWriter& csv, Real h) {
+            csv.meta("h", h);
+            csv.header("sigma", "a_eff", "a_base", "ratio");
+        },
+        [](CsvWriter& csv, Volatility sigma,
+           const SparseMatrix& mat, Size midNode, Real h) {
+            Real lower = Real(mat(midNode, midNode - 1));
+            Real upper = Real(mat(midNode, midNode + 1));
+            Real aEff = (lower + upper) * h * h / 2.0;
+            Real aBase = sigma * sigma / 2.0;
+            csv.row(sigma, aEff, aBase,
+                    aBase > 0.0 ? aEff / aBase : 0.0);
+        });
+}
+
+// =====================================================================
 // Experiment 7: M-matrix off-diagonal σ-sweep (Fig 7)
 // =====================================================================
 
 void runMMatrixSweep(const std::string& dataDir) {
-    std::cout << "  Running M-matrix sweep..." << std::flush;
-
-    const Real spot = 100.0;
-    const Rate r = 0.05;
-    const Rate q = 0.0;
-    const Real K = 100.0;
-    const Time T = 1.0;
-
-    const Real xMin = std::log(50.0);
-    const Real xMax = std::log(200.0);
-    const Size xGrid = 200;
-    const Time dt = T / 50.0;
-    const Size midNode = xGrid / 2;
-
-    const Volatility sigmaMin = 0.001;
-    const Volatility sigmaMax = 0.5;
-    const Size nSigma = 50;
-
-    // Log-spaced σ values
-    std::vector<Volatility> sigmas(nSigma);
-    for (Size i = 0; i < nSigma; ++i) {
-        Real t = Real(i) / Real(nSigma - 1);
-        sigmas[i] = sigmaMin * std::pow(sigmaMax / sigmaMin, t);
-    }
-
-    using Scheme = FdmBlackScholesSpatialDesc::Scheme;
-    using Policy = FdmBlackScholesSpatialDesc::MMatrixPolicy;
-    Scheme schemes[] = {Scheme::StandardCentral,
-                        Scheme::ExponentialFitting,
-                        Scheme::MilevTaglianiCNEffectiveDiffusion};
-
-    for (Size si = 0; si < 3; ++si) {
-        std::string schName = schemeName(schemes[si]);
-        CsvWriter csv(dataDir + "/mmatrix_sweep_" + schName + ".csv");
-        writeSweepMeta(csv, schName, schName,
-                       xGrid, Size(0), r, q,
-                       sigmaMin, sigmaMax, nSigma,
-                       K, T, "None", "Uniform1dMesher");
-        csv.header("sigma", "lower", "upper");
-
-        for (Size j = 0; j < nSigma; ++j) {
-            auto proc = makeProcess(spot, r, q, sigmas[j]);
-            auto mesher = ext::make_shared<FdmMesherComposite>(
-                ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
-            auto desc = descForScheme(schemes[si], Policy::None);
-            auto op = ext::make_shared<FdmBlackScholesOp>(
-                mesher, proc, K,
-                false, -Null<Real>(), 0,
-                ext::shared_ptr<FdmQuantoHelper>(), desc);
-            op->setTime(0.0, dt);
-            SparseMatrix mat = op->toMatrix();
-
-            csv.row(sigmas[j],
+    runSigmaSweep(
+        dataDir, "mmatrix_sweep_",
+        "M-matrix sweep",
+        [](CsvWriter& csv, Real) {
+            csv.header("sigma", "lower", "upper");
+        },
+        [](CsvWriter& csv, Volatility sigma,
+           const SparseMatrix& mat, Size midNode, Real) {
+            csv.row(sigma,
                     Real(mat(midNode, midNode - 1)),
                     Real(mat(midNode, midNode + 1)));
-        }
-    }
-
-    std::cout << " done.\n";
+        });
 }
 
 // =====================================================================
@@ -658,21 +596,13 @@ void runBenchmark(const std::string& dataDir) {
     const Real refPrice = bsCall(spot, K, r, q, vol, T);
     auto process = makeProcess(spot, r, q, vol);
 
-    using Scheme = FdmBlackScholesSpatialDesc::Scheme;
-    Scheme schemes[] = {Scheme::StandardCentral,
-                        Scheme::ExponentialFitting,
-                        Scheme::MilevTaglianiCNEffectiveDiffusion};
-
     Size grids[] = {50, 100, 200, 400, 800, 1600};
-    // No wall-clock timing — use deterministic cost proxy (xGrid*tGrid)
 
     ext::shared_ptr<StrikedTypePayoff> payoff(
         new PlainVanillaPayoff(Option::Call, K));
 
-    // One CSV per scheme.  Use mMatrixPolicy=None for benchmark so
-    // scheme == effective_scheme (no ambiguous fallback provenance).
-    for (Size si = 0; si < 3; ++si) {
-        std::string schName = schemeName(schemes[si]);
+    for (auto scheme : ALL_SCHEMES) {
+        std::string schName = schemeName(scheme);
 
         CsvWriter csv(dataDir + "/benchmark_" + schName + ".csv");
         writeStandardMeta(csv, schName, schName,
@@ -683,33 +613,11 @@ void runBenchmark(const std::string& dataDir) {
         csv.meta("cost_note", "relative_cost = xGrid * tGrid (deterministic proxy for runtime)");
         csv.header("xGrid", "tGrid", "relative_cost", "price", "error");
 
+        auto desc = descForScheme(scheme);
         for (Size xGrid : grids) {
             Size tGrid = 4 * xGrid;
-
-            auto desc = descForScheme(schemes[si]);
-
-            auto equityMesher = ext::make_shared<FdmBlackScholesMesher>(
-                xGrid, process, T, K);
-            auto mesher = ext::make_shared<FdmMesherComposite>(equityMesher);
-            auto calc = ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
-            auto conditions = ext::make_shared<FdmStepConditionComposite>(
-                std::list<std::vector<Time>>(),
-                FdmStepConditionComposite::Conditions());
-
-            FdmSolverDesc solverDesc = {
-                mesher, FdmBoundaryConditionSet(), conditions,
-                calc, T, tGrid, 0};
-
-            FdmBlackScholesSolver solver(
-                Handle<GeneralizedBlackScholesProcess>(process),
-                K, solverDesc,
-                FdmSchemeDesc::CrankNicolson(),
-                false, -Null<Real>(),
-                Handle<FdmQuantoHelper>(), desc);
-
-            Real price = solver.valueAt(spot);
-
-            // Use xGrid*tGrid as a deterministic cost proxy
+            Real price = solveEuropean(process, payoff, desc,
+                                       K, T, xGrid, tGrid, spot);
             csv.row(xGrid, tGrid, Size(xGrid) * Size(tGrid),
                     price, std::fabs(price - refPrice));
         }
@@ -734,11 +642,6 @@ void runDiscreteBarrier(const std::string& dataDir,
     std::cout << "  Running discrete barrier (" << label << ")..." << std::flush;
 
     auto process = makeProcess(100.0, r, q, vol);
-
-    using Scheme = FdmBlackScholesSpatialDesc::Scheme;
-    Scheme schemes[] = {Scheme::StandardCentral,
-                        Scheme::ExponentialFitting,
-                        Scheme::MilevTaglianiCNEffectiveDiffusion};
 
     // Monitoring dates (equally spaced, including maturity)
     std::vector<Time> monitoringTimes;
@@ -795,10 +698,9 @@ void runDiscreteBarrier(const std::string& dataDir,
 
     const FdmBoundaryConditionSet bcSet;
 
-    // One CSV per scheme
-    for (Size si = 0; si < 3; ++si) {
-        auto desc = descForScheme(schemes[si]);
-        std::string schName = schemeName(schemes[si]);
+    for (auto scheme : ALL_SCHEMES) {
+        auto desc = descForScheme(scheme);
+        std::string schName = schemeName(scheme);
 
         CsvWriter csv(dataDir + "/barrier_" + label + "_" + schName + ".csv");
         writeStandardMeta(csv, schName, schName,
