@@ -1,0 +1,21 @@
+# scheme: StandardCentral
+# effective_scheme: StandardCentral
+# xGrid: 0
+# tGrid: 0
+# r: 0.05
+# q: 0.02
+# sigma: 0.2
+# strike: 100
+# maturity: 1
+# mMatrixPolicy: None
+# mesh: FdmBlackScholesMesher
+# spot: 100
+# reference_price: 9.22700550815404
+# cost_note: relative_cost = xGrid * tGrid (deterministic proxy for runtime)
+xGrid,tGrid,relative_cost,price,error
+50,200,10000,9.23359940094143,0.00659389278739653
+100,400,40000,9.22863207950698,0.00162657135294531
+200,800,160000,9.22741099242184,0.000405484267801626
+400,1600,640000,9.22710623235877,0.000100724204731506
+800,3200,2560000,9.22703062074352,2.51125894870086e-05
+1600,6400,10240000,9.22701177362315,6.26546911597359e-06
