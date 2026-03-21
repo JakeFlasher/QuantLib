@@ -437,18 +437,26 @@ def fig6():
     ax.set_title(r'Effective Diffusion vs Volatility ($\sigma$-Sweep)')
     ax.legend()
 
-    # Find regime transition: sigma where EF/SC ratio drops below 2
-    # (i.e., where EF is no longer adding significant extra diffusion)
-    sc = sweep_data['StandardCentral']
-    ef = sweep_data['ExponentialFitting']
-    ratio = ef['a_eff'] / sc['a_eff']
-    trans_idx = np.where(ratio < 2.0)[0]
-    if len(trans_idx) > 0:
-        sigma_star = sc['sigma'][trans_idx[0]]
+    # Regime transition marker: σ_* where Pe(σ) = 1 on this mesh.
+    # Pe = μh/σ² where μ = r-q-σ²/2.  Solve numerically from sweep metadata.
+    sc_meta = load_csv('effective_diffusion_sweep_StandardCentral.csv')[0]
+    h_sweep = float(sc_meta.get('h', '0.006966'))
+    r_sweep = float(sc_meta.get('r', '0.05'))
+    q_sweep = float(sc_meta.get('q', '0.0'))
+    sc_sigma = sweep_data['StandardCentral']['sigma']
+    pe_vals = np.array([(r_sweep - q_sweep - s**2/2) * h_sweep / s**2
+                        for s in sc_sigma])
+    # Interpolate to find σ where Pe crosses 1
+    cross_idx = np.where(np.diff(np.sign(pe_vals - 1.0)))[0]
+    if len(cross_idx) > 0:
+        i = cross_idx[0]
+        # Linear interpolation between samples
+        f = (1.0 - pe_vals[i]) / (pe_vals[i+1] - pe_vals[i])
+        sigma_star = sc_sigma[i] + f * (sc_sigma[i+1] - sc_sigma[i])
         ax.axvline(sigma_star, color='gray', ls=':', lw=0.8, alpha=0.7)
-        ax.text(sigma_star * 1.3, ax.get_ylim()[0] * 3,
-                f'$\\sigma_* \\approx {sigma_star:.2f}$\n'
-                'EF/SC converge\n(ratio < 2)',
+        ax.text(sigma_star * 1.5, ax.get_ylim()[0] * 3,
+                f'$\\sigma_* \\approx {sigma_star:.4f}$\n'
+                '$Pe(\\sigma_*) = 1$',
                 fontsize=6.5, color='#555555', bbox=ANNOT_BOX)
 
     # Annotation: regime summary
@@ -541,19 +549,23 @@ def fig8():
     ax2.set_title('Cost-Accuracy Tradeoff')
     ax2.legend(fontsize=7)
 
-    # Data-grounded accuracy annotation — use SC (representative, all identical)
-    sc_meta, sc_arr = load_csv('benchmark_StandardCentral.csv')
-    if 'wall_ms' in sc_arr:
-        idx_200 = np.argmin(np.abs(sc_arr['xGrid'] - 200))
-        err_200 = sc_arr['error'][idx_200]
-        ref_price = float(sc_meta.get('reference_price', '9.227'))
-        rel_err = err_200 / ref_price * 100
-        wall_200 = sc_arr['wall_ms'][idx_200]
+    # Data-grounded accuracy annotation from each scheme at N_x=200
+    lines = []
+    for s in SCHEME_ORDER:
+        s_meta, s_arr = load_csv(f'benchmark_{s}.csv')
+        if 'wall_ms' in s_arr:
+            idx_200 = np.argmin(np.abs(s_arr['xGrid'] - 200))
+            err_200 = s_arr['error'][idx_200]
+            ref_price = float(s_meta.get('reference_price', '9.227'))
+            rel_err = err_200 / ref_price * 100
+            wall_200 = s_arr['wall_ms'][idx_200]
+            short = {'StandardCentral': 'SC', 'ExponentialFitting': 'EF',
+                     'MilevTaglianiCN': 'MT'}[s]
+            lines.append(f'{short}: {rel_err:.3f}%, {wall_200:.1f} ms')
+    if lines:
         ax2.text(0.98, 0.95,
-                 f'SC at $N_x=200$: {rel_err:.3f}% rel. error\n'
-                 f'Wall-clock: {wall_200:.1f} ms (median of 3)\n'
-                 '(all schemes identical at this $\\sigma$)',
-                 transform=ax2.transAxes, fontsize=7,
+                 f'At $N_x=200$:\n' + '\n'.join(lines),
+                 transform=ax2.transAxes, fontsize=6.5,
                  verticalalignment='top', horizontalalignment='right',
                  bbox=ANNOT_BOX)
 
@@ -580,24 +592,26 @@ def fig9():
 
     ax.set_xlabel('P\u00e9clet Number $Pe$')
     ax.set_ylabel(r'Fitting Factor $\rho = x\coth(x)$')
-    ax.set_title('Duffy Fitting Factor: Regime Transition')
+    ax.set_title('Duffy Fitting Factor: Implementation Regimes')
     ax.legend()
-    ax.set_xlim(-20, 20)
-    ax.set_ylim(0, 22)
+    ax.set_xlim(-80, 80)
+    ax.set_ylim(0, 82)
 
-    # Implementation regime labels matching xCothx three-regime evaluation
-    # Taylor: |x| < xSmall (1e-6), Direct: xSmall <= |x| <= xLarge (50),
-    # Asymptotic: |x| > xLarge
-    ax.text(-15, 16, 'Asymptotic\n$\\rho \\approx |Pe|$',
-            fontsize=8, ha='center', color='#555555',
+    # Implementation regime boundaries: |x| < 1e-6 (Taylor), 1e-6 <= |x| <= 50 (Direct), |x| > 50 (Asymptotic)
+    ax.axvline(50, color='purple', ls='--', lw=0.6, alpha=0.5)
+    ax.axvline(-50, color='purple', ls='--', lw=0.6, alpha=0.5)
+
+    # Regime labels placed in their actual implementation ranges
+    ax.text(0, 5, 'Taylor\n$\\rho \\approx 1 + x^2/3$\n($|x| < 10^{-6}$)',
+            fontsize=7.5, ha='center', color='#555555',
             bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
                       alpha=0.7))
-    ax.text(0, 3, 'Taylor\n$\\rho \\approx 1 + Pe^2/3$',
-            fontsize=8, ha='center', color='#555555',
+    ax.text(25, 35, 'Direct\n$\\rho = x\\coth(x)$\n($10^{-6} \\leq |x| \\leq 50$)',
+            fontsize=7.5, ha='center', color='#555555',
             bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
                       alpha=0.7))
-    ax.text(8, 8, 'Direct\n$\\rho = x\\coth(x)$',
-            fontsize=8, ha='center', color='#555555',
+    ax.text(65, 68, 'Asymptotic\n$\\rho \\approx |x|$\n($|x| > 50$)',
+            fontsize=7.5, ha='center', color='#555555',
             bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow',
                       alpha=0.7))
 

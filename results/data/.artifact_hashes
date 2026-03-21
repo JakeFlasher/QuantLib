@@ -1,3 +1,4 @@
+07b04109c408b7f4290aec5ec6ae939c  /home/jakeshea/QuantLib_huatai/results/figures/fig6_effective_diffusion.pdf
 171a4a349c0fbabb2e94d0de5598c1f2  /home/jakeshea/QuantLib_huatai/results/data/effective_diffusion_sweep_MilevTaglianiCN.csv
 1abdcaaf1e8026521bb1a62d4fb2aecd  /home/jakeshea/QuantLib_huatai/results/figures/fig3_barrier_moderate.pdf
 22ae99da3c45442c1f65f58cc64e4643  /home/jakeshea/QuantLib_huatai/results/data/barrier_low_vol_ExponentialFitting.csv
@@ -10,17 +11,16 @@
 4d33ae541c29d13706ef5eae4af1f61a  /home/jakeshea/QuantLib_huatai/results/data/mmatrix_sweep_ExponentialFitting.csv
 4e9e27443b5fba9be118a23097eaca20  /home/jakeshea/QuantLib_huatai/results/data/barrier_moderate_vol_reference_ExponentialFitting.csv
 5b81541447f96e98474e224cf34f092b  /home/jakeshea/QuantLib_huatai/results/data/barrier_moderate_vol_MilevTaglianiCN.csv
+60d50e64e6278c287c68c68a1afe1a9f  /home/jakeshea/QuantLib_huatai/results/data/mc_barrier_low_vol.csv
 735cba2397e12f2297d17c01a55a00a1  /home/jakeshea/QuantLib_huatai/results/data/xcothx.csv
 8a6f31842a15accf0d0d31ad160f9bf2  /home/jakeshea/QuantLib_huatai/results/data/truncated_call_reference.csv
+8ff41e383ec01d46d19950642c42a5b2  /home/jakeshea/QuantLib_huatai/results/figures/fig4_barrier_lowvol.pdf
 9305de1f13c963a4eb22f32825575726  /home/jakeshea/QuantLib_huatai/results/data/barrier_moderate_vol_ExponentialFitting.csv
 940c3a4e9712c1f11d52e2f6e3dc8400  /home/jakeshea/QuantLib_huatai/results/data/truncated_call_StandardCentral.csv
 963942305920618de03f8ab316c4480c  /home/jakeshea/QuantLib_huatai/results/data/barrier_moderate_vol_StandardCentral.csv
-ab212bbfcf4fb76a997145227df35ea2  /home/jakeshea/QuantLib_huatai/results/figures/fig4_barrier_lowvol.pdf
 ae2e6156def0916321c08bcde5994d62  /home/jakeshea/QuantLib_huatai/results/data/grid_convergence_ExponentialFitting.csv
-b4c90c0c15f8ecfb524c074ee21fd434  /home/jakeshea/QuantLib_huatai/results/figures/fig9_xcothx.pdf
+ae8b3c48cf65c1fa3dc36cf61b0a8c15  /home/jakeshea/QuantLib_huatai/results/figures/fig9_xcothx.pdf
 b5da9ce449b1e0b0565be7a184d933b6  /home/jakeshea/QuantLib_huatai/results/data/barrier_low_vol_MilevTaglianiCN.csv
-b9ffcb807394f8206373b0c270d2ef67  /home/jakeshea/QuantLib_huatai/results/figures/fig6_effective_diffusion.pdf
-bbb6d875630e3b442d174d0f88ffb30c  /home/jakeshea/QuantLib_huatai/results/data/mc_barrier_low_vol.csv
 be1638e5394051fb2e62be3c76f52b9e  /home/jakeshea/QuantLib_huatai/results/data/grid_convergence_StandardCentral.csv
 c1f39e8dc87c36dd55bc4e5f887742eb  /home/jakeshea/QuantLib_huatai/results/data/barrier_low_vol_StandardCentral.csv
 c67d9e999cbd0cf02e03982246cdeba6  /home/jakeshea/QuantLib_huatai/results/figures/fig1_cn_oscillations.pdf

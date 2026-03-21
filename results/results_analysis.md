@@ -128,7 +128,7 @@ At σ = 0.25 (σ² = 0.0625 > r = 0.05), all three FD schemes agree to machine p
 
 **Parameters:** European call, S = 100, K = 100, r = 0.05, q = 0.02, σ = 0.20, T = 1.0. Reference: analytical Black-Scholes formula. Joint space-time refinement with tGrid = 4·xGrid.
 
-**Results:** All three schemes converge at O(h²) rate on the log-log plot. Measured convergence rates (least-squares fit on the last 4 grid points in the asymptotic regime) are annotated on Figure 5 for each scheme. In the moderate-volatility regime (σ² > r), the convergence behavior is virtually identical across schemes, confirming that the nonstandard schemes do not degrade accuracy when the standard scheme already works well.
+**Results:** All three schemes converge at O(h²) rate on the log-log plot. Measured convergence rates (least-squares fit on the last 4 grid points in the asymptotic regime) are annotated on Figure 5 for each scheme. At σ = 0.20, we have σ² = 0.04 and r − q = 0.03, so σ² > r − q and the Péclet number is moderate. The convergence behavior is virtually identical across schemes, with MT showing approximately 2.5× the absolute error of SC/EF at coarse grids due to its first-order time component, but all converge at the expected quadratic rate.
 
 #### Error Quantification
 
@@ -150,7 +150,7 @@ MT shows approximately 2.5× the error of SC/EF at coarse grids due to its first
 
 **Parameters:** Volatility sweep from σ = 0.001 to σ = 0.5 (50 log-spaced values), r = 0.05, q = 0, uniform log-mesh with 200 nodes, mMatrixPolicy = None (raw scheme behavior).
 
-**Results:** Figure 6 plots effective diffusion a_eff vs σ on log-log axes for all three schemes. At low σ (≤ 0.01), the schemes differ by orders of magnitude: MilevTaglianiCN >> ExponentialFitting >> StandardCentral. At high σ (≥ 0.2), all three converge as the base diffusion σ²/2 dominates. A vertical line marks σ_* where the EF/SC effective-diffusion ratio drops below 2, indicating the transition from the diffusion-dominated regime (where the nonstandard schemes add significant artificial diffusion) to the convergent regime. This illustrates the papers' core insight: nonstandard schemes add artificial diffusion precisely in the low-volatility regime where the standard scheme produces spurious oscillations.
+**Results:** Figure 6 plots effective diffusion a_eff vs σ on log-log axes for all three schemes. At low σ (≤ 0.01), the schemes differ by orders of magnitude: MilevTaglianiCN >> ExponentialFitting >> StandardCentral. At high σ (≥ 0.2), all three converge as the base diffusion σ²/2 dominates. A vertical line marks σ_* ≈ 0.0186, the volatility at which the mesh Péclet number Pe = μh/σ² equals 1 on the sweep mesh (h ≈ 0.00697). Below σ_*, convection dominates diffusion (Pe > 1) and the nonstandard schemes add significant artificial diffusion; above it, the standard central scheme is adequate. This illustrates the papers' core insight: nonstandard schemes add artificial diffusion precisely in the low-volatility regime where the standard scheme produces spurious oscillations.
 
 Figure 7 shows the lower and upper off-diagonal entries of the operator matrix vs σ. The left subplot (lower off-diagonal) uses a symlog scale to accommodate both positive and negative values. StandardCentral's lower off-diagonal becomes negative below σ ≈ 0.02 — an M-matrix violation. ExponentialFitting and MilevTaglianiCN maintain non-negative lower off-diagonals across the entire σ range, confirming their M-matrix compliance.
 
@@ -158,11 +158,11 @@ Figure 7 shows the lower and upper off-diagonal entries of the operator matrix v
 
 **Parameters:** European call, same as convergence study. Uses `mMatrixPolicy=None` (no fallback) so scheme identity is unambiguous. The primary cost metric is the work-unit count N_x × N_t (proportional to the number of tridiagonal solves). Supplemental wall-clock timing (median of 3 runs after warm-up, `std::chrono::steady_clock`) is also recorded in the CSV data and annotated on Figure 8.
 
-**Results:** The cost-accuracy tradeoff is essentially identical across all three schemes. Since σ=0.20 is well into the σ² > r regime, the nonstandard schemes produce the same coefficients as StandardCentral and impose no additional computational cost. The tridiagonal solve dominates, and the scheme coefficient computation (xCothx or r²h²/(8σ²)) is negligible.
+**Results:** At σ = 0.20, σ² = 0.04 is close to but slightly below r = 0.05, so the Péclet number is moderate (Pe ≈ 0.1 on this mesh). SC and EF produce nearly identical errors (0.004–0.005% at N_x=200), while MT shows slightly higher error (0.007%) due to its first-order time component. Wall-clock times at N_x=200 range from ~4 ms (SC) to ~7 ms (EF), with the small differences reflecting the additional arithmetic in the fitting factor and effective-diffusion computations. The tridiagonal solve dominates overall cost. Figure 8 annotates per-scheme error and timing at N_x=200.
 
 ### Experiment 7: Péclet Number Dependence (Figure 9)
 
-**Results:** The fitting factor ρ = x·coth(x) smoothly transitions from ρ ≈ 1 (standard central) at low Pe to ρ ≈ |Pe| (asymptotic) at high Pe. The three-regime numerical implementation provides seamless coverage, with Figure 9 annotating each regime: "Taylor" near Pe = 0 where ρ ≈ 1 + Pe²/3 (|x| < 10⁻⁶), "Direct" in the moderate range where ρ = x·coth(x) is computed directly (10⁻⁶ ≤ |x| ≤ 50), and "Asymptotic" at large |Pe| where ρ ≈ |x| (|x| > 50).
+**Results:** The fitting factor ρ = x·coth(x) smoothly transitions from ρ ≈ 1 (standard central) at low Pe to ρ ≈ |Pe| (asymptotic) at high Pe. Figure 9 shows the full range |Pe| ≤ 80, with vertical boundary lines at |Pe| = 50 marking the implementation regime transitions. The three-regime numerical evaluation is labeled directly on the plot: "Taylor" (|x| < 10⁻⁶, ρ ≈ 1 + x²/3), "Direct" (10⁻⁶ ≤ |x| ≤ 50, ρ = x·coth(x) computed exactly), and "Asymptotic" (|x| > 50, ρ ≈ |x|). This ensures seamless, overflow-free evaluation across all Péclet numbers.
 
 ## 5. Discussion
 
