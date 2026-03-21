@@ -110,13 +110,13 @@ This avoids the 0/0 indeterminate form at x = 0 and overflow for large arguments
 
 **Results:** All three schemes converge at O(h²) rate on the log-log plot. In the moderate-volatility regime (σ² > r), the convergence behavior is virtually identical across schemes, confirming that the nonstandard schemes do not degrade accuracy when the standard scheme already works well.
 
-### Experiment 5: Operator Diagnostics (Figures 6–7)
+### Experiment 5: Volatility-Sweep Diagnostics (Figures 6–7)
 
-**Parameters:** σ = 0.001, r = 0.05, uniform log-mesh with 200 nodes.
+**Parameters:** Volatility sweep from σ = 0.001 to σ = 0.5 (50 log-spaced values), r = 0.05, q = 0, uniform log-mesh with 200 nodes, mMatrixPolicy = None (raw scheme behavior).
 
-**Results:** Figure 7 shows the off-diagonal entries of the operator matrix. StandardCentral has negative lower off-diagonals across most of the grid — a clear M-matrix violation. Both ExponentialFitting and MilevTaglianiCN maintain non-negative off-diagonals everywhere.
+**Results:** Figure 6 plots effective diffusion a_eff vs σ on log-log axes for all three schemes. At low σ (≤ 0.01), the schemes differ by orders of magnitude: MilevTaglianiCN >> ExponentialFitting >> StandardCentral. At high σ (≥ 0.2), all three converge as the base diffusion σ²/2 dominates. This illustrates the papers' core insight: nonstandard schemes add artificial diffusion precisely in the low-volatility regime where the standard scheme produces spurious oscillations.
 
-Figure 6 compares the effective diffusion coefficients. StandardCentral uses σ²/2 = 5×10⁻⁷ (barely visible on log scale). ExponentialFitting inflates this by the fitting factor ρ, while MilevTaglianiCN adds the r²h²/(8σ²) term. Both achieve values orders of magnitude larger than the base diffusion, which is the mechanism that ensures M-matrix compliance.
+Figure 7 shows the lower and upper off-diagonal entries of the operator matrix vs σ. The left subplot (lower off-diagonal) uses a symlog scale to accommodate both positive and negative values. StandardCentral's lower off-diagonal becomes negative below σ ≈ 0.02 — an M-matrix violation. ExponentialFitting and MilevTaglianiCN maintain non-negative lower off-diagonals across the entire σ range, confirming their M-matrix compliance.
 
 ### Experiment 6: Performance Benchmark (Figure 8)
 

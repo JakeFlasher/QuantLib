@@ -343,17 +343,16 @@ def fig5():
 def fig6():
     fig, ax = plt.subplots()
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'effective_diffusion_{s}.csv')
-        validate_meta(f'effective_diffusion_{s}.csv', m)
+        m, h, d = read_csv(f'effective_diffusion_sweep_{s}.csv')
+        validate_meta(f'effective_diffusion_sweep_{s}.csv', m)
         arr = to_float_arrays(h, d)
-        ax.plot(arr['S'], arr['aUsed'], color=COLORS[s], ls=STYLES[s],
-                label=LABELS[s])
+        ax.loglog(arr['sigma'], arr['a_eff'], color=COLORS[s], ls=STYLES[s],
+                  label=LABELS[s])
 
-    ax.set_xlabel(r'Stock Price $S$')
+    ax.set_xlabel(r'Volatility $\sigma$')
     ax.set_ylabel(r'Effective Diffusion $a_{\mathrm{eff}}$')
-    ax.set_title(r'Artificial Diffusion: Duffy vs MT ($\sigma=0.001$)')
+    ax.set_title(r'Effective Diffusion vs Volatility ($\sigma$-Sweep)')
     ax.legend()
-    ax.set_yscale('log')
     save_pdf(fig, 'fig6_effective_diffusion.pdf')
     print('  Fig 6: Effective diffusion')
 
@@ -366,23 +365,27 @@ def fig7():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
     for s in SCHEME_ORDER:
-        m, h, d = read_csv(f'mmatrix_offdiag_{s}.csv')
-        validate_meta(f'mmatrix_offdiag_{s}.csv', m)
+        m, h, d = read_csv(f'mmatrix_sweep_{s}.csv')
+        validate_meta(f'mmatrix_sweep_{s}.csv', m)
         arr = to_float_arrays(h, d)
-        ax1.plot(arr['S'], arr['lower'], color=COLORS[s], ls=STYLES[s],
-                 label=LABELS[s])
-        ax2.plot(arr['S'], arr['upper'], color=COLORS[s], ls=STYLES[s],
-                 label=LABELS[s])
+        ax1.semilogx(arr['sigma'], arr['lower'], color=COLORS[s],
+                     ls=STYLES[s], label=LABELS[s])
+        ax2.loglog(arr['sigma'], arr['upper'], color=COLORS[s],
+                   ls=STYLES[s], label=LABELS[s])
 
-    for ax, title in [(ax1, r'Lower Off-Diagonal $a_{i,i-1}$'),
-                      (ax2, r'Upper Off-Diagonal $a_{i,i+1}$')]:
-        ax.axhline(0, color='red', ls=':', lw=0.8, alpha=0.7)
-        ax.set_xlabel(r'Stock Price $S$')
-        ax.set_ylabel(title)
-        ax.set_title(title.split('$')[0].strip())
-        ax.legend(fontsize=7)
+    ax1.axhline(0, color='red', ls='--', lw=1.0, alpha=0.8)
+    ax1.set_yscale('symlog', linthresh=1e-2)
+    ax1.set_xlabel(r'Volatility $\sigma$')
+    ax1.set_ylabel(r'Lower Off-Diagonal $a_{i,i-1}$')
+    ax1.set_title('Lower Off-Diagonal')
+    ax1.legend(fontsize=7)
 
-    fig.suptitle(r'M-Matrix Property: Off-Diagonal Signs ($\sigma=0.001$)',
+    ax2.set_xlabel(r'Volatility $\sigma$')
+    ax2.set_ylabel(r'Upper Off-Diagonal $a_{i,i+1}$')
+    ax2.set_title('Upper Off-Diagonal')
+    ax2.legend(fontsize=7)
+
+    fig.suptitle(r'M-Matrix Off-Diagonals vs Volatility ($\sigma$-Sweep)',
                  y=1.02)
     fig.tight_layout()
     save_pdf(fig, 'fig7_mmatrix.pdf')
@@ -440,7 +443,7 @@ def fig9():
     ax.axhline(1.0, color='gray', ls='--', lw=0.5, alpha=0.5,
                label=r'$\rho=1$ (central limit)')
 
-    ax.set_xlabel(r'P\'eclet Number $Pe$')
+    ax.set_xlabel('P\u00e9clet Number $Pe$')
     ax.set_ylabel(r'Fitting Factor $\rho = x\coth(x)$')
     ax.set_title('Duffy Fitting Factor: Regime Transition')
     ax.legend()

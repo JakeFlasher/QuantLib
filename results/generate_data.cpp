@@ -426,17 +426,44 @@ void runGridConvergence(const std::string& dataDir) {
     std::cout << " done.\n";
 }
 
+// Write sweep metadata block for volatility-sweep experiments.
+static void writeSweepMeta(CsvWriter& csv,
+                           const std::string& schemeName_,
+                           const std::string& effectiveScheme,
+                           Size xGrid, Size tGrid,
+                           Rate r, Rate q,
+                           Volatility sigmaMin, Volatility sigmaMax,
+                           Size nSigma,
+                           Real strike, Time maturity,
+                           const std::string& mMatrixPol,
+                           const std::string& mesh) {
+    csv.meta("scheme", schemeName_);
+    csv.meta("effective_scheme", effectiveScheme);
+    csv.meta("xGrid", xGrid);
+    csv.meta("tGrid", tGrid);
+    csv.meta("r", r);
+    csv.meta("q", q);
+    csv.meta("sigma", "sweep");
+    csv.meta("sigmaMin", sigmaMin);
+    csv.meta("sigmaMax", sigmaMax);
+    csv.meta("nSigma", nSigma);
+    csv.meta("sweepSpacing", "log");
+    csv.meta("strike", strike);
+    csv.meta("maturity", maturity);
+    csv.meta("mMatrixPolicy", mMatrixPol);
+    csv.meta("mesh", mesh);
+}
+
 // =====================================================================
-// Experiment 6-7: Operator diagnostics (Figs 6-7)
+// Experiment 6: Effective diffusion σ-sweep (Fig 6)
 // =====================================================================
 
-void runOperatorDiagnostics(const std::string& dataDir) {
-    std::cout << "  Running operator diagnostics..." << std::flush;
+void runEffectiveDiffusionSweep(const std::string& dataDir) {
+    std::cout << "  Running effective diffusion sweep..." << std::flush;
 
     const Real spot = 100.0;
     const Rate r = 0.05;
     const Rate q = 0.0;
-    const Volatility vol = 0.001;
     const Real K = 100.0;
     const Time T = 1.0;
 
@@ -445,64 +472,119 @@ void runOperatorDiagnostics(const std::string& dataDir) {
     const Size xGrid = 200;
     const Real h = (xMax - xMin) / (xGrid - 1);
     const Time dt = T / 50.0;
+    const Size midNode = xGrid / 2;
 
-    auto process = makeProcess(spot, r, q, vol);
-    auto mesher = ext::make_shared<FdmMesherComposite>(
-        ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+    const Volatility sigmaMin = 0.001;
+    const Volatility sigmaMax = 0.5;
+    const Size nSigma = 50;
+
+    // Log-spaced σ values
+    std::vector<Volatility> sigmas(nSigma);
+    for (Size i = 0; i < nSigma; ++i) {
+        Real t = Real(i) / Real(nSigma - 1);
+        sigmas[i] = sigmaMin * std::pow(sigmaMax / sigmaMin, t);
+    }
 
     using Scheme = FdmBlackScholesSpatialDesc::Scheme;
+    using Policy = FdmBlackScholesSpatialDesc::MMatrixPolicy;
     Scheme schemes[] = {Scheme::StandardCentral,
                         Scheme::ExponentialFitting,
                         Scheme::MilevTaglianiCNEffectiveDiffusion};
 
-    // Off-diagonal data (Fig 7) — one CSV per scheme
     for (Size si = 0; si < 3; ++si) {
         std::string schName = schemeName(schemes[si]);
-        CsvWriter csv(dataDir + "/mmatrix_offdiag_" + schName + ".csv");
-        writeStandardMeta(csv, schName, schName,
-                          xGrid, Size(0), r, q, vol, K, T,
-                          "None", "Uniform1dMesher");
-        csv.header("node", "S", "lower", "upper");
+        CsvWriter csv(dataDir + "/effective_diffusion_sweep_" + schName + ".csv");
+        writeSweepMeta(csv, schName, schName,
+                       xGrid, Size(0), r, q,
+                       sigmaMin, sigmaMax, nSigma,
+                       K, T, "None", "Uniform1dMesher");
+        csv.meta("h", h);
+        csv.header("sigma", "a_eff", "a_base", "ratio");
 
-        auto desc = descForScheme(schemes[si]);
-        auto op = ext::make_shared<FdmBlackScholesOp>(
-            mesher, process, K,
-            false, -Null<Real>(), 0,
-            ext::shared_ptr<FdmQuantoHelper>(), desc);
-        op->setTime(0.0, dt);
-        SparseMatrix mat = op->toMatrix();
+        for (Size j = 0; j < nSigma; ++j) {
+            auto proc = makeProcess(spot, r, q, sigmas[j]);
+            auto mesher = ext::make_shared<FdmMesherComposite>(
+                ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+            auto desc = descForScheme(schemes[si], Policy::None);
+            auto op = ext::make_shared<FdmBlackScholesOp>(
+                mesher, proc, K,
+                false, -Null<Real>(), 0,
+                ext::shared_ptr<FdmQuantoHelper>(), desc);
+            op->setTime(0.0, dt);
+            SparseMatrix mat = op->toMatrix();
 
-        for (Size i = 1; i + 1 < xGrid; ++i) {
-            Real S = std::exp(xMin + i * h);
-            csv.row(i, S,
-                    Real(mat(i, i-1)), Real(mat(i, i+1)));
+            Real lower = Real(mat(midNode, midNode - 1));
+            Real upper = Real(mat(midNode, midNode + 1));
+            Real aEff = (lower + upper) * h * h / 2.0;
+            Real aBase = sigmas[j] * sigmas[j] / 2.0;
+            csv.row(sigmas[j], aEff, aBase,
+                    aBase > 0.0 ? aEff / aBase : 0.0);
         }
     }
 
-    // Effective diffusion data (Fig 6) — one CSV per scheme
+    std::cout << " done.\n";
+}
+
+// =====================================================================
+// Experiment 7: M-matrix off-diagonal σ-sweep (Fig 7)
+// =====================================================================
+
+void runMMatrixSweep(const std::string& dataDir) {
+    std::cout << "  Running M-matrix sweep..." << std::flush;
+
+    const Real spot = 100.0;
+    const Rate r = 0.05;
+    const Rate q = 0.0;
+    const Real K = 100.0;
+    const Time T = 1.0;
+
+    const Real xMin = std::log(50.0);
+    const Real xMax = std::log(200.0);
+    const Size xGrid = 200;
+    const Time dt = T / 50.0;
+    const Size midNode = xGrid / 2;
+
+    const Volatility sigmaMin = 0.001;
+    const Volatility sigmaMax = 0.5;
+    const Size nSigma = 50;
+
+    // Log-spaced σ values
+    std::vector<Volatility> sigmas(nSigma);
+    for (Size i = 0; i < nSigma; ++i) {
+        Real t = Real(i) / Real(nSigma - 1);
+        sigmas[i] = sigmaMin * std::pow(sigmaMax / sigmaMin, t);
+    }
+
+    using Scheme = FdmBlackScholesSpatialDesc::Scheme;
+    using Policy = FdmBlackScholesSpatialDesc::MMatrixPolicy;
+    Scheme schemes[] = {Scheme::StandardCentral,
+                        Scheme::ExponentialFitting,
+                        Scheme::MilevTaglianiCNEffectiveDiffusion};
+
     for (Size si = 0; si < 3; ++si) {
         std::string schName = schemeName(schemes[si]);
-        CsvWriter csv(dataDir + "/effective_diffusion_" + schName + ".csv");
-        writeStandardMeta(csv, schName, schName,
-                          xGrid, Size(0), r, q, vol, K, T,
-                          "None", "Uniform1dMesher");
-        csv.meta("h", h);
-        csv.header("node", "S", "aUsed");
+        CsvWriter csv(dataDir + "/mmatrix_sweep_" + schName + ".csv");
+        writeSweepMeta(csv, schName, schName,
+                       xGrid, Size(0), r, q,
+                       sigmaMin, sigmaMax, nSigma,
+                       K, T, "None", "Uniform1dMesher");
+        csv.header("sigma", "lower", "upper");
 
-        auto desc = descForScheme(schemes[si]);
-        auto op = ext::make_shared<FdmBlackScholesOp>(
-            mesher, process, K,
-            false, -Null<Real>(), 0,
-            ext::shared_ptr<FdmQuantoHelper>(), desc);
-        op->setTime(0.0, dt);
-        SparseMatrix mat = op->toMatrix();
+        for (Size j = 0; j < nSigma; ++j) {
+            auto proc = makeProcess(spot, r, q, sigmas[j]);
+            auto mesher = ext::make_shared<FdmMesherComposite>(
+                ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+            auto desc = descForScheme(schemes[si], Policy::None);
+            auto op = ext::make_shared<FdmBlackScholesOp>(
+                mesher, proc, K,
+                false, -Null<Real>(), 0,
+                ext::shared_ptr<FdmQuantoHelper>(), desc);
+            op->setTime(0.0, dt);
+            SparseMatrix mat = op->toMatrix();
 
-        for (Size i = 1; i + 1 < xGrid; ++i) {
-            Real S = std::exp(xMin + i * h);
-            Real lower = Real(mat(i, i-1));
-            Real upper = Real(mat(i, i+1));
-            Real aUsed = (lower + upper) * h * h / 2.0;
-            csv.row(i, S, aUsed);
+            csv.row(sigmas[j],
+                    Real(mat(midNode, midNode - 1)),
+                    Real(mat(midNode, midNode + 1)));
         }
     }
 
@@ -859,8 +941,11 @@ int main(int argc, char* argv[]) {
         // Fig 9: xCothx/Peclet (fastest, no solver)
         runXCothx(dataDir);
 
-        // Figs 6-7: Operator diagnostics
-        runOperatorDiagnostics(dataDir);
+        // Fig 6: Effective diffusion σ-sweep
+        runEffectiveDiffusionSweep(dataDir);
+
+        // Fig 7: M-matrix off-diagonal σ-sweep
+        runMMatrixSweep(dataDir);
 
         // Fig 5: Grid convergence
         runGridConvergence(dataDir);

@@ -21,6 +21,13 @@ echo "      Build complete."
 # 2. Run the data generator
 echo "[2/4] Generating experiment data..."
 mkdir -p "$DATA_DIR" "$FIG_DIR"
+# Remove stale artifacts from old spatial diagnostics
+rm -f "$DATA_DIR"/effective_diffusion_StandardCentral.csv \
+      "$DATA_DIR"/effective_diffusion_ExponentialFitting.csv \
+      "$DATA_DIR"/effective_diffusion_MilevTaglianiCN.csv \
+      "$DATA_DIR"/mmatrix_offdiag_StandardCentral.csv \
+      "$DATA_DIR"/mmatrix_offdiag_ExponentialFitting.csv \
+      "$DATA_DIR"/mmatrix_offdiag_MilevTaglianiCN.csv
 cd "$BUILD_DIR"
 LD_LIBRARY_PATH="${SCRIPT_DIR}/../build/ql:${LD_LIBRARY_PATH:-}" ./generate_data "$DATA_DIR"
 cd "$SCRIPT_DIR"
