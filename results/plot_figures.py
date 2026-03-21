@@ -13,7 +13,6 @@ from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -141,7 +140,7 @@ def save_pdf(fig, name):
 
 def fig1():
     sc_meta, sc = load_csv('truncated_call_StandardCentral.csv')
-    ref_meta, ref = load_csv('truncated_call_reference.csv')
+    _, ref = load_csv('truncated_call_reference.csv')
 
     fig, ax = plt.subplots()
     ax.plot(sc['S'], sc['price'], color=COLORS['StandardCentral'],
@@ -240,8 +239,8 @@ def fig3():
         m, arr = load_csv(f'barrier_moderate_vol_{s}.csv')
         if first_meta is None:
             first_meta = m
-        L = float(m['lower_barrier'])
-        U = float(m['upper_barrier'])
+            L = float(m['lower_barrier'])
+            U = float(m['upper_barrier'])
         mask = (arr['S'] >= L - 5) & (arr['S'] <= U + 5)
         ax.plot(arr['S'][mask], arr['price'][mask],
                 color=COLORS[s], ls=STYLES[s], label=LABELS[s])
@@ -270,8 +269,6 @@ def fig3():
     except FileNotFoundError:
         pass
 
-    L = float(first_meta['lower_barrier'])
-    U = float(first_meta['upper_barrier'])
     ax.set_xlim(L - 5, U + 5)
     ax.set_xlabel(r'Stock Price $S$')
     ax.set_ylabel(r'Option Value $V(S)$')
@@ -306,8 +303,8 @@ def fig4():
         m, arr = load_csv(f'barrier_low_vol_{s}.csv')
         if first_meta is None:
             first_meta = m
-        L = float(m['lower_barrier'])
-        U = float(m['upper_barrier'])
+            L = float(m['lower_barrier'])
+            U = float(m['upper_barrier'])
         mask = (arr['S'] >= L - 5) & (arr['S'] <= U + 5)
         ax.plot(arr['S'][mask], arr['price'][mask],
                 color=COLORS[s], ls=STYLES[s], label=LABELS[s])
@@ -332,8 +329,6 @@ def fig4():
     ax.set_title(r'Low-Vol Discrete Barrier '
                  r'($\sigma=0.001$, $\sigma^2 \ll r$)')
     ax.legend(fontsize=7)
-    L = float(first_meta['lower_barrier'])
-    U = float(first_meta['upper_barrier'])
     ax.axvline(L, color='gray', ls='--', lw=0.8, alpha=0.6)
     ax.axvline(U, color='gray', ls='--', lw=0.8, alpha=0.6)
     ax.text(L, ax.get_ylim()[1]*0.95, f' $L={int(L)}$', fontsize=7,
@@ -379,14 +374,14 @@ def fig5():
                   color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
                   label=LABELS[s])
 
-    # O(h^2) reference slope
-    x = arr['xGrid']
-    y0 = arr['error'][0] if arr['error'][0] > 0 else 1e-2
+    # O(h^2) reference slope (use last scheme; all share the same xGrid)
+    last = scheme_data[SCHEME_ORDER[-1]]
+    x = last['xGrid']
+    y0 = last['error'][0] if last['error'][0] > 0 else 1e-2
     ax.loglog(x, y0 * (x[0]/x)**2, 'k:', lw=0.5, alpha=0.5,
               label=r'$O(h^2)$ slope')
 
     # Convergence rate annotations via least-squares fit on last 4 points
-    colors_list = [COLORS[s] for s in SCHEME_ORDER]
     for i, s in enumerate(SCHEME_ORDER):
         d = scheme_data[s]
         log_x = np.log(d['xGrid'][-4:])
@@ -401,8 +396,8 @@ def fig5():
             xy=(last_x, last_y),
             xytext=(15, 5 + i*12),
             textcoords='offset points',
-            fontsize=7, color=colors_list[i],
-            arrowprops=dict(arrowstyle='->', color=colors_list[i], lw=0.5))
+            fontsize=7, color=COLORS[s],
+            arrowprops=dict(arrowstyle='->', color=COLORS[s], lw=0.5))
 
     # Label annotation explaining refinement type
     ax.text(0.02, 0.02,
@@ -426,8 +421,10 @@ def fig5():
 def fig6():
     fig, ax = plt.subplots()
     sweep_data = {}
+    sweep_meta = {}
     for s in SCHEME_ORDER:
-        _, arr = load_csv(f'effective_diffusion_sweep_{s}.csv')
+        m, arr = load_csv(f'effective_diffusion_sweep_{s}.csv')
+        sweep_meta[s] = m
         sweep_data[s] = arr
         ax.loglog(arr['sigma'], arr['a_eff'], color=COLORS[s], ls=STYLES[s],
                   label=LABELS[s])
@@ -439,7 +436,7 @@ def fig6():
 
     # Regime transition marker: σ_* where Pe(σ) = 1 on this mesh.
     # Pe = μh/σ² where μ = r-q-σ²/2.  Solve numerically from sweep metadata.
-    sc_meta = load_csv('effective_diffusion_sweep_StandardCentral.csv')[0]
+    sc_meta = sweep_meta['StandardCentral']
     h_sweep = float(sc_meta.get('h', '0.006966'))
     r_sweep = float(sc_meta.get('r', '0.05'))
     q_sweep = float(sc_meta.get('q', '0.0'))
@@ -528,10 +525,15 @@ def fig7():
 def fig8():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
-    last_arr = None
+    SHORT_NAMES = {'StandardCentral': 'SC', 'ExponentialFitting': 'EF',
+                   'MilevTaglianiCN': 'MT'}
+
+    scheme_meta = {}
+    scheme_data = {}
     for s in SCHEME_ORDER:
-        _, arr = load_csv(f'benchmark_{s}.csv')
-        last_arr = arr
+        m, arr = load_csv(f'benchmark_{s}.csv')
+        scheme_meta[s] = m
+        scheme_data[s] = arr
         ax1.loglog(arr['xGrid'], arr['relative_cost'],
                    color=COLORS[s], ls=STYLES[s], marker='s', ms=4,
                    label=LABELS[s])
@@ -552,16 +554,14 @@ def fig8():
     # Data-grounded accuracy annotation from each scheme at N_x=200
     lines = []
     for s in SCHEME_ORDER:
-        s_meta, s_arr = load_csv(f'benchmark_{s}.csv')
+        s_arr = scheme_data[s]
         if 'wall_ms' in s_arr:
             idx_200 = np.argmin(np.abs(s_arr['xGrid'] - 200))
             err_200 = s_arr['error'][idx_200]
-            ref_price = float(s_meta.get('reference_price', '9.227'))
+            ref_price = float(scheme_meta[s].get('reference_price', '9.227'))
             rel_err = err_200 / ref_price * 100
             wall_200 = s_arr['wall_ms'][idx_200]
-            short = {'StandardCentral': 'SC', 'ExponentialFitting': 'EF',
-                     'MilevTaglianiCN': 'MT'}[s]
-            lines.append(f'{short}: {rel_err:.3f}%, {wall_200:.1f} ms')
+            lines.append(f'{SHORT_NAMES[s]}: {rel_err:.3f}%, {wall_200:.1f} ms')
     if lines:
         ax2.text(0.98, 0.95,
                  f'At $N_x=200$:\n' + '\n'.join(lines),

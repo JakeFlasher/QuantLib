@@ -744,8 +744,8 @@ void runDiscreteBarrier(const std::string& dataDir,
         solver.rollback(rhs, T, 0.0, tGrid, 0);
 
         // Look up values at requested spots via valueAtSpot
-        for (Size j = 0; j < spots.size(); ++j) {
-            csv.row(spots[j], valueAtSpot(rhs, mesher, spots[j]));
+        for (Real spot : spots) {
+            csv.row(spot, valueAtSpot(rhs, mesher, spot));
         }
     }
 
