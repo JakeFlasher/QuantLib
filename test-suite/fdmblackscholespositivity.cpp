@@ -27,6 +27,7 @@
 #include <ql/math/matrixutilities/sparsematrix.hpp>
 #include <ql/processes/blackscholesprocess.hpp>
 #include <ql/quotes/simplequote.hpp>
+#include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
 #include <ql/time/daycounters/actual365fixed.hpp>
 
 #include <boost/test/unit_test.hpp>
@@ -1161,13 +1162,19 @@ BOOST_AUTO_TEST_CASE(testThetaAtFirstAccessor) {
         setup.maturity, tGrid, 0
     };
 
-    auto spotQuote = ext::make_shared<SimpleQuote>(setup.spot);
+    // Use a mutable vol quote so we can trigger solver recalculation.
+    // Changing vol directly affects the PDE coefficients (drift and
+    // diffusion), ensuring the theta value actually changes.
+    auto volQuote = ext::make_shared<SimpleQuote>(setup.vol);
 
     auto process = ext::make_shared<BlackScholesMertonProcess>(
-        Handle<Quote>(spotQuote),
+        Handle<Quote>(ext::make_shared<SimpleQuote>(setup.spot)),
         Handle<YieldTermStructure>(flatRate(setup.today, setup.q, setup.dc)),
         Handle<YieldTermStructure>(flatRate(setup.today, setup.r, setup.dc)),
-        Handle<BlackVolTermStructure>(flatVol(setup.today, setup.vol, setup.dc)));
+        Handle<BlackVolTermStructure>(
+            ext::make_shared<BlackConstantVol>(
+                setup.today, Calendar(), Handle<Quote>(volQuote),
+                setup.dc)));
 
     FdmBlackScholesSolver solver(
         Handle<GeneralizedBlackScholesProcess>(process),
@@ -1182,22 +1189,31 @@ BOOST_AUTO_TEST_CASE(testThetaAtFirstAccessor) {
     BOOST_CHECK_MESSAGE(std::isfinite(theta1),
         "thetaAt() as first accessor returned non-finite value: " << theta1);
 
-    // After valueAt, thetaAt should still work
+    // After valueAt, thetaAt should return a consistent result at the
+    // same spot (same solver state, same interpolation point)
     const Real value = solver.valueAt(setup.spot);
     BOOST_CHECK(std::isfinite(value));
     const Real theta2 = solver.thetaAt(setup.spot);
     BOOST_CHECK_MESSAGE(std::isfinite(theta2),
         "thetaAt() after valueAt() returned non-finite value: " << theta2);
+    BOOST_CHECK_MESSAGE(std::fabs(theta2 - theta1) < 1e-12,
+        "thetaAt() should be consistent before and after valueAt(): "
+        "theta1=" << theta1 << ", theta2=" << theta2);
 
-    // After modifying the process, thetaAt should return an updated
-    // (different) value reflecting recalculation
-    spotQuote->setValue(setup.spot * 1.1);
-    const Real theta3 = solver.thetaAt(setup.spot * 1.1);
-    BOOST_CHECK_MESSAGE(std::isfinite(theta3),
-        "thetaAt() after process change returned non-finite value: " << theta3);
-    BOOST_CHECK_MESSAGE(std::fabs(theta3 - theta1) > 1e-14,
-        "thetaAt() should return a different value after process change: "
-        "theta1=" << theta1 << ", theta3=" << theta3);
+    // After changing the vol quote, thetaAt at the SAME spot should
+    // return a different value, proving LazyObject recalculation.
+    // Vol change directly affects PDE coefficients (drift, diffusion).
+    const Real thetaBeforeUpdate = solver.thetaAt(setup.spot);
+    volQuote->setValue(setup.vol * 10.0);
+    const Real thetaAfterUpdate = solver.thetaAt(setup.spot);
+    BOOST_CHECK_MESSAGE(std::isfinite(thetaAfterUpdate),
+        "thetaAt() after vol change returned non-finite value: "
+        << thetaAfterUpdate);
+    BOOST_CHECK_MESSAGE(
+        std::fabs(thetaAfterUpdate - thetaBeforeUpdate) > 1e-14,
+        "thetaAt() at the same s should differ after vol update "
+        "(proves recalculation): before=" << thetaBeforeUpdate
+        << ", after=" << thetaAfterUpdate);
 
     // Negative test: s <= 0 should not produce a finite result.
     // log(0) = -inf and log(negative) = NaN, so interpolation at

@@ -523,6 +523,56 @@ BOOST_AUTO_TEST_CASE(testTolerantTimeMatching) {
         BOOST_CHECK_MESSAGE(!anyChanged,
             "Empty monitoring times should never trigger barrier");
     }
+
+    // Short-maturity boundary cases that distinguish the correct
+    // relative tolerance (tol * max(|*it|,|t|)) from the old broken
+    // absolute-like scaling (tol * max(|t|, 1.0)).
+    //
+    // At t=0.25 with tol=1e-10:
+    //   - correct: threshold = 1e-10 * 0.25 = 2.5e-11
+    //   - old:     threshold = 1e-10 * 1.0  = 1.0e-10
+    //
+    // A delta of 5e-11 is INSIDE the old threshold but OUTSIDE the
+    // correct threshold. This test MUST NOT trigger under the correct
+    // implementation (and would spuriously trigger under the old code).
+    {
+        // 5e-11 from lower_bound candidate (above t=0.25):
+        // must NOT match (5e-11 > 2.5e-11 relative threshold)
+        BOOST_CHECK_MESSAGE(!testApply(0.25 + 5e-11),
+            "0.25+5e-11 should NOT trigger: delta 5e-11 exceeds "
+            "relative threshold 2.5e-11 at t=0.25");
+
+        // 5e-11 from predecessor (below t=0.25):
+        // must NOT match
+        BOOST_CHECK_MESSAGE(!testApply(0.25 - 5e-11),
+            "0.25-5e-11 should NOT trigger: delta 5e-11 exceeds "
+            "relative threshold 2.5e-11 at t=0.25");
+
+        // 2e-11 from lower_bound candidate (above):
+        // SHOULD match (2e-11 < 2.5e-11 relative threshold)
+        BOOST_CHECK_MESSAGE(testApply(0.25 + 2e-11),
+            "0.25+2e-11 should trigger: delta 2e-11 is within "
+            "relative threshold 2.5e-11 at t=0.25");
+
+        // 2e-11 from predecessor (below):
+        // SHOULD match
+        BOOST_CHECK_MESSAGE(testApply(0.25 - 2e-11),
+            "0.25-2e-11 should trigger: delta 2e-11 is within "
+            "relative threshold 2.5e-11 at t=0.25");
+
+        // Same test at t=0.50:
+        //   - correct: threshold = 1e-10 * 0.50 = 5e-11
+        //   - old:     threshold = 1e-10 * 1.0  = 1e-10
+        // Delta 8e-11: inside old, outside correct
+        BOOST_CHECK_MESSAGE(!testApply(0.50 + 8e-11),
+            "0.50+8e-11 should NOT trigger: delta 8e-11 exceeds "
+            "relative threshold 5e-11 at t=0.50");
+
+        // Delta 4e-11: inside both
+        BOOST_CHECK_MESSAGE(testApply(0.50 + 4e-11),
+            "0.50+4e-11 should trigger: delta 4e-11 is within "
+            "relative threshold 5e-11 at t=0.50");
+    }
 }
 
 

@@ -1560,7 +1560,9 @@ BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
     }
 
     // Test boundary-only cPoint: single cPoint at xMin exercising
-    // the Concentrating1dMesher path (not uniform fallback)
+    // the Concentrating1dMesher path (not uniform fallback).
+    // We prove concentration was used by comparing against a uniform
+    // reference mesh and asserting the spacings differ.
     {
         std::vector<std::tuple<Real, Real, bool>> cPtsSingle = {
             {L, 0.1, true}  // only cPoint, exactly at xMin
@@ -1591,6 +1593,28 @@ BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
                 "Single-cPoint mesh not strictly increasing at index "
                 << i);
         }
+
+        // Prove Concentrating1dMesher was used (not uniform fallback):
+        // a uniform mesh has constant spacing h = (xMax-xMin)/(N-1).
+        // A concentrated mesh has non-uniform spacing near the cPoint.
+        // Compute the spacing near xMin (where concentration is) and
+        // compare against uniform spacing.
+        const Real xMaxSingle = locsSingle.back();
+        const Real xMinSingle = locsSingle.front();
+        const Real uniformH =
+            (xMaxSingle - xMinSingle) / (locsSingle.size() - 1);
+        const Real h0 = locsSingle[1] - locsSingle[0];
+        const Real hMid = locsSingle[xGrid/2] - locsSingle[xGrid/2 - 1];
+
+        // Concentrated mesh: spacing near the cPoint (h0) should
+        // differ from mid-domain spacing (hMid). A uniform mesh has
+        // h0 == hMid == uniformH.
+        BOOST_CHECK_MESSAGE(
+            std::fabs(h0 - hMid) / uniformH > 0.01,
+            "Boundary-only cPoint mesh should have non-uniform spacing "
+            "(proves Concentrating1dMesher, not uniform fallback). "
+            "h0=" << h0 << ", hMid=" << hMid
+            << ", uniformH=" << uniformH);
     }
 
     // Test far-outside cPoint: a cPoint well below xMin should be
