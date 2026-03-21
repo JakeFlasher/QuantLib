@@ -1253,15 +1253,10 @@ BOOST_AUTO_TEST_CASE(testDiscreteBarrierRejectsNonEuropeanExercise) {
         "Testing discrete barrier engine rejects "
         "American and Bermudan exercise...");
 
-    const DayCounter dc = Actual365Fixed();
     const Date today(28, March, 2004);
     Settings::instance().evaluationDate() = today;
 
-    auto process = ext::make_shared<BlackScholesMertonProcess>(
-        Handle<Quote>(ext::make_shared<SimpleQuote>(100.0)),
-        Handle<YieldTermStructure>(flatRate(today, 0.0, dc)),
-        Handle<YieldTermStructure>(flatRate(today, 0.05, dc)),
-        Handle<BlackVolTermStructure>(flatVol(today, 0.25, dc)));
+    auto process = makeBSProcess(100.0, 0.05, 0.0, 0.25);
 
     const Date exerciseDate = today + Period(6, Months);
     const auto payoff =
@@ -1328,7 +1323,6 @@ BOOST_AUTO_TEST_CASE(testValuationDateMonitoringKnockOut) {
         "Testing t=0 discrete barrier monitoring "
         "(spot outside corridor at valuation date)...");
 
-    const DayCounter dc = Actual365Fixed();
     const Date today(28, March, 2004);
     Settings::instance().evaluationDate() = today;
 
@@ -1336,11 +1330,7 @@ BOOST_AUTO_TEST_CASE(testValuationDateMonitoringKnockOut) {
     const Real barrier = 90.0;
     const Real rebate = 2.0;
 
-    auto process = ext::make_shared<BlackScholesMertonProcess>(
-        Handle<Quote>(ext::make_shared<SimpleQuote>(spot)),
-        Handle<YieldTermStructure>(flatRate(today, 0.0, dc)),
-        Handle<YieldTermStructure>(flatRate(today, 0.05, dc)),
-        Handle<BlackVolTermStructure>(flatVol(today, 0.25, dc)));
+    auto process = makeBSProcess(spot, 0.05, 0.0, 0.25);
 
     const Date exerciseDate = today + Period(6, Months);
     const auto exercise = ext::make_shared<EuropeanExercise>(exerciseDate);
@@ -1406,11 +1396,7 @@ BOOST_AUTO_TEST_CASE(testValuationDateMonitoringKnockOut) {
     // match the non-t=0 baseline (t=0 check is a no-op when inside)
     {
         const Real insideSpot = 100.0;  // inside [90, infinity)
-        auto processInside = ext::make_shared<BlackScholesMertonProcess>(
-            Handle<Quote>(ext::make_shared<SimpleQuote>(insideSpot)),
-            Handle<YieldTermStructure>(flatRate(today, 0.0, dc)),
-            Handle<YieldTermStructure>(flatRate(today, 0.05, dc)),
-            Handle<BlackVolTermStructure>(flatVol(today, 0.25, dc)));
+        auto processInside = makeBSProcess(insideSpot, 0.05, 0.0, 0.25);
 
         // With today in monitoring dates
         BarrierOption optWith(Barrier::DownOut, barrier, rebate,
@@ -1492,6 +1478,24 @@ BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
     const Time maturity = 0.5;
     const Size xGrid = 200;
 
+    // Helper: true if logTarget appears as a grid node in locs.
+    auto hasNode = [](const std::vector<Real>& locs, Real logTarget) {
+        return std::any_of(locs.begin(), locs.end(),
+            [logTarget](Real x) {
+                return std::fabs(x - logTarget) < 1e-10;
+            });
+    };
+
+    // Helper: verify a mesh is strictly increasing.
+    auto checkStrictlyIncreasing =
+        [](const std::vector<Real>& locs, const std::string& label) {
+        for (Size i = 1; i < locs.size(); ++i) {
+            BOOST_CHECK_MESSAGE(locs[i] > locs[i-1],
+                label << " not strictly increasing at index " << i
+                << ": " << locs[i-1] << " >= " << locs[i]);
+        }
+    };
+
     // Set xMinConstraint = log(L) so that the lower barrier
     // is EXACTLY at the domain boundary.
     const Real xMinConstraint = std::log(L);
@@ -1508,32 +1512,15 @@ BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
 
     const auto& locs = mesher.locations();
 
-    // Verify L=90 (which maps to xMin) is present as a grid node
-    const Real targetLog = std::log(L);
-    bool found = false;
-    for (Size i = 0; i < locs.size(); ++i) {
-        if (std::fabs(locs[i] - targetLog) < 1e-10) {
-            found = true;
-            break;
-        }
-    }
-
-    BOOST_CHECK_MESSAGE(found,
+    BOOST_CHECK_MESSAGE(hasNode(locs, std::log(L)),
         "Critical point at domain boundary L="
-        << L << " (logLevel=" << targetLog
-        << " = xMin) should be retained by multi-point mesher");
+        << L << " (xMin) should be retained by multi-point mesher");
 
-    // Verify mesh is strictly increasing
-    for (Size i = 1; i < locs.size(); ++i) {
-        BOOST_CHECK_MESSAGE(locs[i] > locs[i-1],
-            "Mesh not strictly increasing at index " << i
-            << ": " << locs[i-1] << " >= " << locs[i]);
-    }
+    checkStrictlyIncreasing(locs, "Main mesh");
 
     // Test xMax boundary: critical point at upper domain edge
     {
         const Real U = 130.0;
-        const Real xMaxConstraint = std::log(U);
 
         std::vector<std::tuple<Real, Real, bool>> cPts = {
             {K, 0.1, true},
@@ -1542,27 +1529,16 @@ BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
 
         FdmBlackScholesMesher mesherMax(
             xGrid, process, maturity, K,
-            Null<Real>(), xMaxConstraint, 0.0001, 1.5,
+            Null<Real>(), std::log(U), 0.0001, 1.5,
             cPts);
 
-        const auto& locsMax = mesherMax.locations();
-        const Real targetMax = std::log(U);
-        bool foundMax = false;
-        for (Size i = 0; i < locsMax.size(); ++i) {
-            if (std::fabs(locsMax[i] - targetMax) < 1e-10) {
-                foundMax = true;
-                break;
-            }
-        }
-        BOOST_CHECK_MESSAGE(foundMax,
+        BOOST_CHECK_MESSAGE(hasNode(mesherMax.locations(), std::log(U)),
             "Critical point at xMax boundary U=" << U
             << " should be retained");
     }
 
     // Test boundary-only cPoint: single cPoint at xMin exercising
     // the Concentrating1dMesher path (not uniform fallback).
-    // We prove concentration was used by comparing against a uniform
-    // reference mesh and asserting the spacings differ.
     {
         std::vector<std::tuple<Real, Real, bool>> cPtsSingle = {
             {L, 0.1, true}  // only cPoint, exactly at xMin
@@ -1575,40 +1551,20 @@ BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
 
         const auto& locsSingle = mesherSingle.locations();
 
-        // Verify the cPoint is retained and mesh is valid
-        bool foundSingle = false;
-        for (Size i = 0; i < locsSingle.size(); ++i) {
-            if (std::fabs(locsSingle[i] - std::log(L)) < 1e-10) {
-                foundSingle = true;
-                break;
-            }
-        }
-        BOOST_CHECK_MESSAGE(foundSingle,
+        BOOST_CHECK_MESSAGE(hasNode(locsSingle, std::log(L)),
             "Boundary-only cPoint should be retained when it is the "
             "sole concentration point");
 
-        // Mesh must be strictly increasing
-        for (Size i = 1; i < locsSingle.size(); ++i) {
-            BOOST_CHECK_MESSAGE(locsSingle[i] > locsSingle[i-1],
-                "Single-cPoint mesh not strictly increasing at index "
-                << i);
-        }
+        checkStrictlyIncreasing(locsSingle, "Single-cPoint mesh");
 
         // Prove Concentrating1dMesher was used (not uniform fallback):
-        // a uniform mesh has constant spacing h = (xMax-xMin)/(N-1).
-        // A concentrated mesh has non-uniform spacing near the cPoint.
-        // Compute the spacing near xMin (where concentration is) and
-        // compare against uniform spacing.
-        const Real xMaxSingle = locsSingle.back();
-        const Real xMinSingle = locsSingle.front();
+        // a concentrated mesh has non-uniform spacing near the cPoint.
         const Real uniformH =
-            (xMaxSingle - xMinSingle) / (locsSingle.size() - 1);
+            (locsSingle.back() - locsSingle.front())
+            / (locsSingle.size() - 1);
         const Real h0 = locsSingle[1] - locsSingle[0];
         const Real hMid = locsSingle[xGrid/2] - locsSingle[xGrid/2 - 1];
 
-        // Concentrated mesh: spacing near the cPoint (h0) should
-        // differ from mid-domain spacing (hMid). A uniform mesh has
-        // h0 == hMid == uniformH.
         BOOST_CHECK_MESSAGE(
             std::fabs(h0 - hMid) / uniformH > 0.01,
             "Boundary-only cPoint mesh should have non-uniform spacing "
@@ -1632,16 +1588,8 @@ BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
             xMinConstraint, Null<Real>(), 0.0001, 1.5,
             cPtsFar);
 
-        const auto& locsFar = mesherFar.locations();
-        const Real farTarget = std::log(farBelow);
-        bool foundFar = false;
-        for (Size i = 0; i < locsFar.size(); ++i) {
-            if (std::fabs(locsFar[i] - farTarget) < 1e-10) {
-                foundFar = true;
-                break;
-            }
-        }
-        BOOST_CHECK_MESSAGE(!foundFar,
+        BOOST_CHECK_MESSAGE(
+            !hasNode(mesherFar.locations(), std::log(farBelow)),
             "Far-outside cPoint at S=" << farBelow
             << " should be filtered out, but was found in mesh");
     }

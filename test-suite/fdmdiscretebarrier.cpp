@@ -472,19 +472,12 @@ BOOST_AUTO_TEST_CASE(testTolerantTimeMatching) {
 
     FdmDiscreteBarrierStepCondition cond(mesher, monTimes, L, U);
 
-    // Helper: create array with known values and apply
+    // Helper: true if applyTo at time t modifies any element.
     auto testApply = [&](Time t) {
         Array a(mesher->layout()->size(), 42.0);
         cond.applyTo(a, t);
-        // Check if barrier was applied (any value changed from 42.0)
-        bool applied = false;
-        for (Size i = 0; i < a.size(); ++i) {
-            if (std::fabs(a[i] - 42.0) > 1e-15) {
-                applied = true;
-                break;
-            }
-        }
-        return applied;
+        return std::any_of(a.begin(), a.end(),
+            [](Real v) { return std::fabs(v - 42.0) > 1e-15; });
     };
 
     // Exact match: should trigger
@@ -508,18 +501,13 @@ BOOST_AUTO_TEST_CASE(testTolerantTimeMatching) {
         "Time 0.75 far from monitoring times should NOT trigger");
 
     // Empty monitoring times: should never trigger
-    FdmDiscreteBarrierStepCondition condEmpty(
-        mesher, std::vector<Time>(), L, U);
     {
+        FdmDiscreteBarrierStepCondition condEmpty(
+            mesher, std::vector<Time>(), L, U);
         Array a(mesher->layout()->size(), 42.0);
         condEmpty.applyTo(a, 0.25);
-        bool anyChanged = false;
-        for (Size i = 0; i < a.size(); ++i) {
-            if (std::fabs(a[i] - 42.0) > 1e-15) {
-                anyChanged = true;
-                break;
-            }
-        }
+        bool anyChanged = std::any_of(a.begin(), a.end(),
+            [](Real v) { return std::fabs(v - 42.0) > 1e-15; });
         BOOST_CHECK_MESSAGE(!anyChanged,
             "Empty monitoring times should never trigger barrier");
     }

@@ -34,13 +34,10 @@ namespace QuantLib {
             const FdmSchemeDesc& schemeDesc, Real tol) {
         switch (schemeDesc.type) {
           case FdmSchemeDesc::CrankNicolsonType:
-            return std::fabs(schemeDesc.theta - 0.5) <= tol;
           case FdmSchemeDesc::DouglasType:
-            // Douglas reduces to CN in one dimension
-            return std::fabs(schemeDesc.theta - 0.5) <= tol;
           case FdmSchemeDesc::CraigSneydType:
-            // CraigSneyd reduces to CN in 1D because apply_mixed()
-            // returns zero for a single spatial dimension
+            // Douglas and CraigSneyd both reduce to CN in one
+            // spatial dimension (apply_mixed() returns zero).
             return std::fabs(schemeDesc.theta - 0.5) <= tol;
           default:
             return false;

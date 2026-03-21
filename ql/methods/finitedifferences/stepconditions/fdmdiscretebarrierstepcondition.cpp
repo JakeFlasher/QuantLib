@@ -70,23 +70,18 @@ namespace QuantLib {
         // representation or rounding differences.
         {
             const Real tol = 1e-10;
+            auto closeEnough = [&](Real a, Real b) {
+                return std::fabs(a - b)
+                    <= tol * std::max(std::fabs(a), std::fabs(b));
+            };
+
             auto it = std::lower_bound(
                 monitoringTimes_.begin(), monitoringTimes_.end(), t);
 
-            bool matched = false;
-            if (it != monitoringTimes_.end()) {
-                const Real absDiff = std::fabs(*it - t);
-                const Real scale = std::max(std::fabs(*it), std::fabs(t));
-                if (absDiff <= tol * scale)
-                    matched = true;
-            }
-            if (!matched && it != monitoringTimes_.begin()) {
-                --it;
-                const Real absDiff = std::fabs(*it - t);
-                const Real scale = std::max(std::fabs(*it), std::fabs(t));
-                if (absDiff <= tol * scale)
-                    matched = true;
-            }
+            bool matched = (it != monitoringTimes_.end()
+                            && closeEnough(*it, t));
+            if (!matched && it != monitoringTimes_.begin())
+                matched = closeEnough(*std::prev(it), t);
             if (!matched)
                 return;
         }

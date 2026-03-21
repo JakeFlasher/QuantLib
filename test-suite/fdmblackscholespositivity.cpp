@@ -1218,33 +1218,20 @@ BOOST_AUTO_TEST_CASE(testThetaAtFirstAccessor) {
     // Negative test: s <= 0 should not produce a finite result.
     // log(0) = -inf and log(negative) = NaN, so interpolation at
     // those values should not return a usable finite number.
-    {
+    // Either an exception or a non-finite result is acceptable.
+    for (Real badS : {0.0, -1.0}) {
         bool caught = false;
         try {
-            const Real badTheta = solver.thetaAt(0.0);
-            // If no exception, the result must be non-finite
+            const Real badTheta = solver.thetaAt(badS);
             BOOST_CHECK_MESSAGE(!std::isfinite(badTheta),
-                "thetaAt(0) should not produce a finite result, got "
-                << badTheta);
-        } catch (...) {
-            caught = true;
-        }
-        // Either an exception or non-finite result is acceptable
-        if (caught)
-            BOOST_TEST_MESSAGE("  thetaAt(0.0) threw (acceptable)");
-    }
-    {
-        bool caught = false;
-        try {
-            const Real badTheta = solver.thetaAt(-1.0);
-            BOOST_CHECK_MESSAGE(!std::isfinite(badTheta),
-                "thetaAt(-1) should not produce a finite result, got "
-                << badTheta);
+                "thetaAt(" << badS << ") should not produce a "
+                "finite result, got " << badTheta);
         } catch (...) {
             caught = true;
         }
         if (caught)
-            BOOST_TEST_MESSAGE("  thetaAt(-1.0) threw (acceptable)");
+            BOOST_TEST_MESSAGE("  thetaAt(" << badS
+                               << ") threw (acceptable)");
     }
 }
 
@@ -1371,20 +1358,20 @@ BOOST_AUTO_TEST_CASE(testCNGateCraigSneydAccepted) {
         BOOST_CHECK_SMALL(std::fabs(vFallback - vExplicit), 1e-10);
     }
 
-    // ImplicitEuler + MT: should fall back to ExpFit
-    {
+    // Non-CN schemes + MT: should silently fall back to ExpFit
+    for (const auto& scheme :
+             {FdmSchemeDesc::ImplicitEuler(),
+              FdmSchemeDesc::Hundsdorfer()}) {
         FdmBlackScholesSolver solverMT(
             Handle<GeneralizedBlackScholesProcess>(setup.process),
-            K, solverDescNoDamping,
-            FdmSchemeDesc::ImplicitEuler(),
+            K, solverDescNoDamping, scheme,
             false, -Null<Real>(),
             Handle<FdmQuantoHelper>(),
             milevTaglianiDesc());
 
         FdmBlackScholesSolver solverFitted(
             Handle<GeneralizedBlackScholesProcess>(setup.process),
-            K, solverDescNoDamping,
-            FdmSchemeDesc::ImplicitEuler(),
+            K, solverDescNoDamping, scheme,
             false, -Null<Real>(),
             Handle<FdmQuantoHelper>(),
             fittedDesc());
@@ -1393,32 +1380,6 @@ BOOST_AUTO_TEST_CASE(testCNGateCraigSneydAccepted) {
         const Real vFit = solverFitted.valueAt(setup.spot);
 
         BOOST_CHECK_SMALL(std::fabs(vMT - vFit), 1e-10);
-    }
-
-    // Hundsdorfer + MT: should fall back to ExpFit
-    {
-        FdmBlackScholesSolver solverMT(
-            Handle<GeneralizedBlackScholesProcess>(setup.process),
-            K, solverDescNoDamping,
-            FdmSchemeDesc::Hundsdorfer(),
-            false, -Null<Real>(),
-            Handle<FdmQuantoHelper>(),
-            milevTaglianiDesc());
-
-        FdmBlackScholesSolver solverFitted(
-            Handle<GeneralizedBlackScholesProcess>(setup.process),
-            K, solverDescNoDamping,
-            FdmSchemeDesc::Hundsdorfer(),
-            false, -Null<Real>(),
-            Handle<FdmQuantoHelper>(),
-            fittedDesc());
-
-        const Real vMT = solverMT.valueAt(setup.spot);
-        const Real vFit = solverFitted.valueAt(setup.spot);
-
-        BOOST_CHECK_SMALL(std::fabs(vMT - vFit), 1e-10);
-        BOOST_TEST_MESSAGE("  Hundsdorfer+MT fallback: "
-            << vMT << " == ExpFit: " << vFit);
     }
 }
 
