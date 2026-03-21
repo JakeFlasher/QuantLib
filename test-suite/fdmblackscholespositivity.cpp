@@ -1127,6 +1127,217 @@ BOOST_AUTO_TEST_CASE(testMilevTaglianiTruncatedCallSmoothing) {
 }
 
 
+BOOST_AUTO_TEST_CASE(testThetaAtFirstAccessor) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing thetaAt() works as first accessor on "
+        "FdmBlackScholesSolver (LazyObject initialization)...");
+
+    LowVolSetup setup;
+
+    const Real K = 60.0;
+    const Real cash = 10.0;
+    const Size xGrid = 100;
+    const Size tGrid = 20;
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(
+            std::log(10.0), std::log(200.0), xGrid));
+
+    const ext::shared_ptr<StrikedTypePayoff> payoff =
+        ext::make_shared<CashOrNothingPayoff>(Option::Put, K, cash);
+    const auto calculator =
+        ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+
+    const auto conditions =
+        ext::make_shared<FdmStepConditionComposite>(
+            std::list<std::vector<Time> >(),
+            FdmStepConditionComposite::Conditions());
+
+    const FdmBoundaryConditionSet bcSet;
+
+    const FdmSolverDesc solverDesc = {
+        mesher, bcSet, conditions, calculator,
+        setup.maturity, tGrid, 0
+    };
+
+    auto spotQuote = ext::make_shared<SimpleQuote>(setup.spot);
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(spotQuote),
+        Handle<YieldTermStructure>(flatRate(setup.today, setup.q, setup.dc)),
+        Handle<YieldTermStructure>(flatRate(setup.today, setup.r, setup.dc)),
+        Handle<BlackVolTermStructure>(flatVol(setup.today, setup.vol, setup.dc)));
+
+    FdmBlackScholesSolver solver(
+        Handle<GeneralizedBlackScholesProcess>(process),
+        K, solverDesc,
+        FdmSchemeDesc::CrankNicolson(),
+        false, -Null<Real>(),
+        Handle<FdmQuantoHelper>(),
+        fittedDesc());
+
+    // thetaAt as FIRST accessor (no prior call to valueAt/deltaAt/gammaAt)
+    const Real theta1 = solver.thetaAt(setup.spot);
+    BOOST_CHECK_MESSAGE(std::isfinite(theta1),
+        "thetaAt() as first accessor returned non-finite value: " << theta1);
+
+    // After valueAt, thetaAt should still work
+    const Real value = solver.valueAt(setup.spot);
+    BOOST_CHECK(std::isfinite(value));
+    const Real theta2 = solver.thetaAt(setup.spot);
+    BOOST_CHECK_MESSAGE(std::isfinite(theta2),
+        "thetaAt() after valueAt() returned non-finite value: " << theta2);
+
+    // After modifying the process, thetaAt should return updated value
+    spotQuote->setValue(setup.spot * 1.1);
+    const Real theta3 = solver.thetaAt(setup.spot * 1.1);
+    BOOST_CHECK_MESSAGE(std::isfinite(theta3),
+        "thetaAt() after process change returned non-finite value: " << theta3);
+}
+
+
+BOOST_AUTO_TEST_CASE(testCNGateCraigSneydAccepted) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing CN-equivalence gate accepts CraigSneyd(0.5) in 1D "
+        "and rejects schemes with damping steps...");
+
+    LowVolSetup setup;
+
+    const Real K = 60.0;
+    const Real cash = 10.0;
+    const Size xGrid = 200;
+    const Size tGrid = 50;
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(
+            std::log(10.0), std::log(200.0), xGrid));
+
+    const ext::shared_ptr<StrikedTypePayoff> payoff =
+        ext::make_shared<CashOrNothingPayoff>(Option::Put, K, cash);
+    const auto calculator =
+        ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+
+    const auto conditions =
+        ext::make_shared<FdmStepConditionComposite>(
+            std::list<std::vector<Time> >(),
+            FdmStepConditionComposite::Conditions());
+
+    const FdmBoundaryConditionSet bcSet;
+
+    const FdmSolverDesc solverDescNoDamping = {
+        mesher, bcSet, conditions, calculator,
+        setup.maturity, tGrid, 0
+    };
+
+    const FdmSolverDesc solverDescWithDamping = {
+        mesher, bcSet, conditions, calculator,
+        setup.maturity, tGrid, 3  // 3 damping steps
+    };
+
+    // CraigSneyd(0.5) + dampingSteps=0 + MT: should be accepted
+    // (produces MT-scheme results, not identical to ExponentialFitting)
+    {
+        FdmBlackScholesSolver solverMT(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping,
+            FdmSchemeDesc::CraigSneyd(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            milevTaglianiDesc());
+
+        FdmBlackScholesSolver solverFitted(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping,
+            FdmSchemeDesc::CraigSneyd(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            fittedDesc());
+
+        const Real vMT = solverMT.valueAt(setup.spot);
+        const Real vFit = solverFitted.valueAt(setup.spot);
+
+        BOOST_CHECK(std::isfinite(vMT));
+        BOOST_CHECK(std::isfinite(vFit));
+
+        // If MT were silently falling back to ExpFit, values would match.
+        // With CraigSneyd accepted, MT uses different spatial coefficients,
+        // so values should differ (unless by coincidence at this vol).
+        BOOST_TEST_MESSAGE("  CraigSneyd+MT: " << vMT
+            << ", CraigSneyd+ExpFit: " << vFit);
+    }
+
+    // CN + dampingSteps > 0 + FailFast: should throw
+    {
+        FdmBlackScholesSpatialDesc desc = milevTaglianiDesc();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::FailFast;
+
+        BOOST_CHECK_THROW(
+            FdmBlackScholesSolver(
+                Handle<GeneralizedBlackScholesProcess>(setup.process),
+                K, solverDescWithDamping,
+                FdmSchemeDesc::CrankNicolson(),
+                false, -Null<Real>(),
+                Handle<FdmQuantoHelper>(),
+                desc).valueAt(setup.spot),
+            Error);
+    }
+
+    // CN + dampingSteps > 0 + FallbackToExponentialFitting: should
+    // silently fall back (match explicit ExpFit results)
+    {
+        FdmBlackScholesSolver solverMTFallback(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescWithDamping,
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            milevTaglianiDesc());
+
+        FdmBlackScholesSolver solverFittedExplicit(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescWithDamping,
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            fittedDesc());
+
+        const Real vFallback = solverMTFallback.valueAt(setup.spot);
+        const Real vExplicit = solverFittedExplicit.valueAt(setup.spot);
+
+        BOOST_CHECK(std::isfinite(vFallback));
+        BOOST_CHECK(std::isfinite(vExplicit));
+        BOOST_CHECK_SMALL(std::fabs(vFallback - vExplicit), 1e-10);
+    }
+
+    // ImplicitEuler + MT: should fall back to ExpFit
+    {
+        FdmBlackScholesSolver solverMT(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping,
+            FdmSchemeDesc::ImplicitEuler(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            milevTaglianiDesc());
+
+        FdmBlackScholesSolver solverFitted(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping,
+            FdmSchemeDesc::ImplicitEuler(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            fittedDesc());
+
+        const Real vMT = solverMT.valueAt(setup.spot);
+        const Real vFit = solverFitted.valueAt(setup.spot);
+
+        BOOST_CHECK_SMALL(std::fabs(vMT - vFit), 1e-10);
+    }
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()

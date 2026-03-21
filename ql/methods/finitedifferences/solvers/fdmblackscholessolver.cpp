@@ -38,6 +38,10 @@ namespace QuantLib {
           case FdmSchemeDesc::DouglasType:
             // Douglas reduces to CN in one dimension
             return std::fabs(schemeDesc.theta - 0.5) <= tol;
+          case FdmSchemeDesc::CraigSneydType:
+            // CraigSneyd reduces to CN in 1D because apply_mixed()
+            // returns zero for a single spatial dimension
+            return std::fabs(schemeDesc.theta - 0.5) <= tol;
           default:
             return false;
         }
@@ -47,18 +51,27 @@ namespace QuantLib {
 
         FdmBlackScholesSpatialDesc effectiveDesc = spatialDesc_;
 
-        // Gating: Scheme-2 requires CN-equivalent time stepping in 1-D
+        // Gating: Scheme-2 requires CN-equivalent time stepping in 1-D.
+        // Damping steps prepend Implicit Euler before the main scheme,
+        // breaking CN-equivalence even when the scheme itself is CN.
+        //
+        // Note: the MT paper (Theorem 3.2) also requires dt < 1/(r*M)
+        // for positive distinct eigenvalues.  The exact bound in log-space
+        // may differ from the S-space result.  No runtime check is
+        // enforced here; see the paper for guidance on grid sizing.
         if (effectiveDesc.scheme ==
                 FdmBlackScholesSpatialDesc::Scheme
                     ::MilevTaglianiCNEffectiveDiffusion) {
-            if (!isCrankNicolsonEquivalent1D(schemeDesc_)) {
+            if (!isCrankNicolsonEquivalent1D(schemeDesc_)
+                || solverDesc_.dampingSteps > 0) {
                 if (effectiveDesc.mMatrixPolicy ==
                         FdmBlackScholesSpatialDesc::MMatrixPolicy::FailFast) {
                     QL_REQUIRE(false,
                         "Scheme-2 (Milev-Tagliani CN effective diffusion) "
                         "requires a Crank-Nicolson-equivalent time scheme "
-                        "in 1D (CrankNicolsonType or DouglasType with "
-                        "theta=0.5)");
+                        "in 1D (CrankNicolsonType, DouglasType, or "
+                        "CraigSneydType with theta=0.5) and "
+                        "dampingSteps=0");
                 }
                 effectiveDesc.scheme =
                     FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting;
@@ -95,6 +108,7 @@ namespace QuantLib {
     }
 
     Real FdmBlackScholesSolver::thetaAt(Real s) const {
+        calculate();
         return solver_->thetaAt(std::log(s));
     }
 }

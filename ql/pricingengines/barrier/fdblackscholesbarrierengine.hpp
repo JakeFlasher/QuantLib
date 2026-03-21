@@ -14,6 +14,10 @@
 
 namespace QuantLib {
 
+    //! Finite-differences barrier engine (single-barrier only).
+    //! For double-barrier knock-out options (Milev-Tagliani Example 4.1),
+    //! use FdmDiscreteBarrierStepCondition directly with both barriers,
+    //! or a dedicated double-barrier engine such as FdHestonDoubleBarrierEngine.
     class FdBlackScholesBarrierEngine : public BarrierOption::engine {
       public:
         // --- Continuous monitoring constructors (unchanged API) ---

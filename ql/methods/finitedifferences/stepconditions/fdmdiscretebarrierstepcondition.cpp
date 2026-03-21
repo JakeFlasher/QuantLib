@@ -63,9 +63,33 @@ namespace QuantLib {
         if (monitoringTimes_.empty())
             return;
 
-        if (!std::binary_search(monitoringTimes_.begin(),
-                                monitoringTimes_.end(), t))
-            return;
+        // Tolerant time matching: use lower_bound and check both the
+        // found element and its predecessor for closeness within a
+        // relative tolerance.  This is more robust than exact
+        // binary_search when monitoring times are recomputed via
+        // different day-count conventions or rounding.
+        {
+            const Real tol = 1e-10;
+            auto it = std::lower_bound(
+                monitoringTimes_.begin(), monitoringTimes_.end(), t);
+
+            bool matched = false;
+            if (it != monitoringTimes_.end()) {
+                const Real absDiff = std::fabs(*it - t);
+                const Real scale = std::max(std::fabs(t), 1.0);
+                if (absDiff <= tol * scale)
+                    matched = true;
+            }
+            if (!matched && it != monitoringTimes_.begin()) {
+                --it;
+                const Real absDiff = std::fabs(*it - t);
+                const Real scale = std::max(std::fabs(t), 1.0);
+                if (absDiff <= tol * scale)
+                    matched = true;
+            }
+            if (!matched)
+                return;
+        }
 
         QL_REQUIRE(a.size() == mesher_->layout()->size(),
                    "array size (" << a.size()

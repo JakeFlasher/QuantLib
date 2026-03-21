@@ -448,6 +448,84 @@ BOOST_AUTO_TEST_CASE(testDiscreteBarrierOscillationAccumulation) {
 }
 
 
+// ===================================================================
+//  Tolerant time matching in discrete barrier step condition
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testTolerantTimeMatching) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing tolerant time matching for monitoring times "
+        "(near-miss triggers, far-miss does not)...");
+
+    const Size xGrid = 100;
+    const Real xMin = std::log(50.0);
+    const Real xMax = std::log(200.0);
+    const Real L = 80.0;
+    const Real U = 120.0;
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+
+    // Monitoring times at t=0.25 and t=0.50
+    const std::vector<Time> monTimes = {0.25, 0.50};
+
+    FdmDiscreteBarrierStepCondition cond(mesher, monTimes, L, U);
+
+    // Helper: create array with known values and apply
+    auto testApply = [&](Time t) {
+        Array a(mesher->layout()->size(), 42.0);
+        cond.applyTo(a, t);
+        // Check if barrier was applied (any value changed from 42.0)
+        bool applied = false;
+        for (Size i = 0; i < a.size(); ++i) {
+            if (std::fabs(a[i] - 42.0) > 1e-15) {
+                applied = true;
+                break;
+            }
+        }
+        return applied;
+    };
+
+    // Exact match: should trigger
+    BOOST_CHECK_MESSAGE(testApply(0.25),
+        "Exact monitoring time 0.25 should trigger barrier");
+    BOOST_CHECK_MESSAGE(testApply(0.50),
+        "Exact monitoring time 0.50 should trigger barrier");
+
+    // Near-miss within tolerance: should trigger
+    BOOST_CHECK_MESSAGE(testApply(0.25 + 1e-13),
+        "Near-miss 0.25+1e-13 should trigger barrier");
+    BOOST_CHECK_MESSAGE(testApply(0.50 - 1e-13),
+        "Near-miss 0.50-1e-13 should trigger barrier");
+
+    // Far from any monitoring time: should NOT trigger
+    BOOST_CHECK_MESSAGE(!testApply(0.10),
+        "Time 0.10 far from monitoring times should NOT trigger");
+    BOOST_CHECK_MESSAGE(!testApply(0.35),
+        "Time 0.35 far from monitoring times should NOT trigger");
+    BOOST_CHECK_MESSAGE(!testApply(0.75),
+        "Time 0.75 far from monitoring times should NOT trigger");
+
+    // Empty monitoring times: should never trigger
+    FdmDiscreteBarrierStepCondition condEmpty(
+        mesher, std::vector<Time>(), L, U);
+    {
+        Array a(mesher->layout()->size(), 42.0);
+        condEmpty.applyTo(a, 0.25);
+        bool anyChanged = false;
+        for (Size i = 0; i < a.size(); ++i) {
+            if (std::fabs(a[i] - 42.0) > 1e-15) {
+                anyChanged = true;
+                break;
+            }
+        }
+        BOOST_CHECK_MESSAGE(!anyChanged,
+            "Empty monitoring times should never trigger barrier");
+    }
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -17,6 +17,9 @@ namespace QuantLib {
 
     class GeneralizedBlackScholesProcess;
 
+    //! Fluent builder for FdBlackScholesBarrierEngine.
+    //! Note: the underlying engine handles single-barrier instruments only.
+    //! For double-barrier knock-out options, build the FD solver manually.
     class MakeFdBlackScholesBarrierEngine {
       public:
         explicit MakeFdBlackScholesBarrierEngine(

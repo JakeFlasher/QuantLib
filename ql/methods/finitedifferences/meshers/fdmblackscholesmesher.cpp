@@ -189,7 +189,7 @@ namespace QuantLib {
 
             if (spotLevel > 0.0) {
                 const Real logLevel = std::log(spotLevel);
-                if (logLevel > xMin && logLevel < xMax) {
+                if (logLevel >= xMin && logLevel <= xMax) {
                     logCPoints.emplace_back(logLevel, density, required);
                 }
             }

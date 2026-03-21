@@ -56,6 +56,11 @@ namespace QuantLib {
                     break;
                   }
                   case FdmBlackScholesSpatialDesc::Scheme::MilevTaglianiCNEffectiveDiffusion: {
+                    // The paper's S-space artificial diffusion (1/8)(r*dS/sigma)^2 * V_SS
+                    // transforms to aAdd*(V_xx - V_x) in log-space.  The drift correction
+                    // (-aAdd on V_x) is deliberately omitted: it is bounded by O(h^2) grid
+                    // error and validated by testMilevTaglianiDriftCorrectionAudit().
+                    // Changing this would alter shipped numerical behaviour.
                     Real aAdd = r * r * h[i] * h[i] / (8.0 * vEff);
                     aAdd = std::min(aAdd, desc.maxAddedDiffusionRatio * aBase);
                     aUsed[i] = aBase + aAdd;
