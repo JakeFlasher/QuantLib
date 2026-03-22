@@ -3,7 +3,7 @@
 **Authors:** [To be determined]
 
 **Abstract.**
-The Crank-Nicolson finite difference scheme is the standard method for solving the Black-Scholes partial differential equation in computational finance, but it produces spurious oscillations and non-physical negative prices when the mesh Péclet number is large — a regime that arises whenever $\sigma^2 \ll r$. We present a QuantLib implementation of three spatial discretization schemes for the one-dimensional Black-Scholes PDE in log-space: StandardCentral (baseline Crank-Nicolson), ExponentialFitting [Duffy2004], and MilevTaglianiCNEffectiveDiffusion [MilevTagliani2010a]. For each scheme we derive the tridiagonal operator coefficients in log-space coordinates, analyze the M-matrix property and positivity guarantees, and state adapted versions of the key theorems from the literature with proofs for the log-space formulation. The implementation features a CN-equivalence gate, an automatic fallback mechanism, and support for discretely monitored double barrier options. We validate the schemes through eight experiment groups producing nine figures and four tables, covering truncated call oscillations, discrete barrier pricing at moderate and low volatility with Monte Carlo references, grid convergence, effective diffusion and M-matrix diagnostics, performance benchmarks, and Péclet number regime visualization. All three schemes achieve $O(h^2)$ convergence on smooth data; ExponentialFitting provides guaranteed M-matrix compliance across all parameter regimes, while MilevTaglianiCN offers an alternative for the low-volatility regime under Crank-Nicolson time stepping. We provide practical scheme selection guidance based on the relationship between $\sigma^2$ and $r$.
+The Crank-Nicolson finite difference scheme is the standard method for solving the Black-Scholes partial differential equation in computational finance, but it produces spurious oscillations and non-physical negative prices when the mesh Péclet number is large — a regime that arises whenever $\sigma^2 \ll r$. We present a QuantLib implementation of three spatial discretization schemes for the one-dimensional Black-Scholes PDE in log-space: StandardCentral (baseline Crank-Nicolson), ExponentialFitting [Duffy2004], and MilevTaglianiCNEffectiveDiffusion [MilevTagliani2010a]. For each scheme we derive the tridiagonal operator coefficients in log-space coordinates, analyze the M-matrix property and positivity guarantees, and present an adapted proof of the CN positivity theorem for log-space together with an empirical characterization of the Milev-Tagliani scheme's behavior. The implementation features a CN-equivalence gate, an automatic fallback mechanism, and support for discretely monitored double barrier options. We validate the schemes through eight experiment groups producing nine figures and four tables, covering truncated call oscillations, discrete barrier pricing at moderate and low volatility with Monte Carlo references, grid convergence, effective diffusion and M-matrix diagnostics, performance benchmarks, and Péclet number regime visualization. All three schemes achieve $O(h^2)$ convergence on smooth data; ExponentialFitting provides guaranteed M-matrix compliance across all parameter regimes, while MilevTaglianiCN offers an alternative for the low-volatility regime under Crank-Nicolson time stepping. We provide practical scheme selection guidance based on the mesh Péclet number $\text{Pe} = \mu h / \sigma^2$.
 
 ---
 
@@ -22,7 +22,7 @@ Two families of nonstandard finite difference schemes address this issue:
 This paper presents an implementation of all three schemes — StandardCentral, ExponentialFitting, and MilevTaglianiCNEffectiveDiffusion — within the QuantLib [QuantLib2024] library's finite difference framework. Our contributions are:
 
 - Derivation of all three scheme operators in **log-space** ($x = \ln S$), where the Black-Scholes PDE has constant coefficients for flat-volatility models, with explicit tridiagonal coefficient formulas.
-- **Adapted proofs** of the key theorems from [MilevTagliani2010a] for the log-space formulation, with careful documentation of the differences from the original S-space results.
+- An **adapted proof** of the CN positivity theorem ([MilevTagliani2010a, Theorem 3.1]) for the log-space formulation, and an **empirical characterization** of the Milev-Tagliani scheme's behavior in log-space, with careful documentation of the differences from the original S-space results.
 - A comprehensive QuantLib implementation featuring a **CN-equivalence gate** (automatic fallback when the time scheme is incompatible with the MT scheme), **M-matrix diagnostics**, and support for **discretely monitored double barrier options**.
 - **Eight numerical experiment groups** producing nine figures and four tables that validate the schemes across a range of parameter regimes, from extreme low volatility ($\sigma = 0.001$) to moderate volatility ($\sigma = 0.25$).
 
@@ -140,24 +140,24 @@ Since $\rho(\text{Pe}) = \text{Pe} \cdot \coth(\text{Pe}) \geq |\text{Pe}| \geq 
 
 The following results are adapted from [MilevTagliani2010a] for the log-space formulation used in the QuantLib implementation. The original theorems are stated in S-space with $S_j = j\Delta S$; the log-space formulation has fundamentally different structure because the convection and diffusion coefficients are constants ($\mu$ and $\sigma^2/2$), independent of the grid node.
 
-**Theorem 2.1** (CN positivity in log-space, adapted from [MilevTagliani2010a, Theorem 3.1]). *Consider the Crank-Nicolson scheme applied to the log-space Black-Scholes PDE (Equation 2) with uniform mesh spacing $h$ and $M$ interior nodes. If $|\text{Pe}| \leq 1$ (equivalently $|\mu|h \leq \sigma^2$), then:*
+**Theorem 2.1** (CN positivity in log-space, adapted from [MilevTagliani2010a, Theorem 3.1]). *Consider the Crank-Nicolson scheme applied to the log-space Black-Scholes PDE (Equation 2) with uniform mesh spacing $h$ and $M$ interior nodes. Define the spatial operator $A$ with off-diagonals $A^- = \sigma^2/(2h^2) - \mu/(2h)$, diagonal $A^0 = -\sigma^2/h^2 - r$, and $A^+ = \sigma^2/(2h^2) + \mu/(2h)$. The CN matrices are $P = (1/\Delta t)I - (1/2)A$ and $N = (1/\Delta t)I + (1/2)A$.*
 
-1. *The implicit matrix $P$ is an M-matrix with $P^{-1} > 0$ and $\|P^{-1}\|_\infty \leq (1/\Delta t + r/2)^{-1}$.*
-2. *If additionally $\Delta t < 2/(r + 2\sigma^2/h^2)$, then the explicit matrix $N$ has non-negative entries, the numerical solution preserves positivity, and the discrete maximum principle holds.*
+*If $|\text{Pe}| < 1$ (strictly; equivalently $|\mu|h < \sigma^2$), then:*
+
+1. *$P$ is an irreducible, strictly diagonally dominant M-matrix with $P^{-1} > 0$ and $\|P^{-1}\|_\infty \leq (1/\Delta t + r/2)^{-1}$.*
+2. *If additionally $\Delta t < 2/(r + 2\sigma^2/h^2)$, then $N \geq 0$, the numerical solution preserves positivity, and the discrete maximum principle holds.*
 3. *Under the same $\Delta t$ bound, $P^{-1}N$ has $M$ distinct real eigenvalues in $(0, 1)$.*
 
-*Proof sketch.* In log-space, the CN tridiagonal matrices are $P = (1/\Delta t)I + C$ and $N = (1/\Delta t)I - C$, where:
+*At the boundary $|\text{Pe}| = 1$, one off-diagonal of $A$ vanishes, $P$ becomes bidiagonal, and the strict conclusions (positive inverse, distinct eigenvalues) may not hold.*
 
-$$C = \text{tridiag}\left\{-\frac{\sigma^2}{2h^2} + \frac{\mu}{2h};\ \frac{\sigma^2}{h^2} + \frac{r}{2};\ -\frac{\sigma^2}{2h^2} - \frac{\mu}{2h}\right\}$$
-
-The off-diagonals of $C$ are $c^- = -(\sigma^2 - \mu h)/(2h^2)$ and $c^+ = -(\sigma^2 + \mu h)/(2h^2)$. The condition $|\text{Pe}| \leq 1$ ensures $|\mu|h \leq \sigma^2$, so both $\sigma^2 - \mu h \geq 0$ and $\sigma^2 + \mu h \geq 0$, making the off-diagonals of $C$ non-positive. Thus $P = (1/\Delta t)I + C$ has positive diagonal and non-positive off-diagonals — an M-matrix. For $N \geq 0$, the diagonal must be non-negative: $1/\Delta t - \sigma^2/h^2 - r/2 \geq 0$, giving $\Delta t < 2/(r + 2\sigma^2/h^2)$. The eigenvalue analysis follows from $\lambda_i(P^{-1}N) = (1 - \Delta t\lambda_i(C))/(1 + \Delta t\lambda_i(C))$. The full proof is in [Appendix A](#appendix-a-adapted-theorem-proofs).
+*Proof sketch.* The off-diagonals of $P$ are $-A^-/2 = -\sigma^2/(4h^2) + \mu/(4h)$ and $-A^+/2 = -\sigma^2/(4h^2) - \mu/(4h)$. Under $|\text{Pe}| < 1$ (i.e., $|\mu|h < \sigma^2$), both $A^- > 0$ and $A^+ > 0$, so both off-diagonals of $P$ are strictly negative. The diagonal of $P$ is $1/\Delta t + \sigma^2/(2h^2) + r/2 > 0$, making $P$ strictly diagonally dominant with non-positive off-diagonals — an irreducible M-matrix. For $N \geq 0$, we need the diagonal non-negative: $1/\Delta t - \sigma^2/(2h^2) - r/2 \geq 0$, giving $\Delta t < 2/(r + 2\sigma^2/h^2)$. The off-diagonals of $N$ are $A^-/2 > 0$ and $A^+/2 > 0$. The eigenvalue analysis follows from writing $P = (1/\Delta t)I + C$ and $N = (1/\Delta t)I - C$ with $C = -A/2$, yielding $\lambda_i(P^{-1}N) = (1 - \Delta t\lambda_i(C))/(1 + \Delta t\lambda_i(C))$. The full proof is in [Appendix A](#appendix-a-adapted-theorem-proofs).
 
 *Remark.* The original S-space condition $\sigma^2 > r$ ([MilevTagliani2010a, Theorem 3.1]) does not transfer directly to log-space. In S-space, the Péclet number varies with $S_j$, and $\sigma^2 > r$ guarantees $|\text{Pe}| \leq 1$ at all nodes. In log-space, the Péclet number is constant across the mesh, and the correct condition is $|\text{Pe}| = |\mu|h/\sigma^2 \leq 1$, which depends on the mesh spacing $h$ and the full drift $\mu = r - q - \sigma^2/2$.
 
 **Observation 2.2** (MT positivity in log-space). *The shipped QuantLib implementation of the Milev-Tagliani scheme is a diffusion-only adaptation that does not exactly reproduce the S-space semi-implicit scheme from [MilevTagliani2010a]. The formal stability analysis (Theorem 3.2 of [MilevTagliani2010a]) applies to the S-space scheme with the specific 6-point stencil parameter $b = -M/2$; the log-space adaptation with only the diffusion addition has a different matrix structure for which we do not claim a rigorous proof.*
 
-*What can be verified empirically:*
-1. *The implicit matrix $P$ is an M-matrix unconditionally in tested regimes, because the added diffusion $r^2h^2/(8\sigma^2)$ makes the diffusion coefficient large enough to dominate the off-diagonals.*
+*What can be verified:*
+1. *The added diffusion $r^2h^2/(8\sigma^2)$ reduces the effective Péclet number, making the M-matrix condition easier to satisfy. In tested regimes ($\sigma \leq 0.5$, $r \leq 0.05$, $q \geq 0$), $P$ is an M-matrix and the scheme produces positive solutions.*
 2. *The test `testMilevTaglianiDriftCorrectionAudit` confirms the drift correction omission is bounded by $O(h^2)$ grid error for the audited parameters.*
 3. *Edge cases exist: `testNegativeDividendYieldMMatrixFallback` shows that with negative dividend yield on a coarse mesh, the MT scheme can violate the M-matrix condition, triggering the `FallbackToExponentialFitting` safety net.*
 
@@ -334,7 +334,7 @@ At $\sigma = 0.001$ ($\sigma^2 = 10^{-6} \ll r = 0.05$), the Péclet number is e
 
 **Parameters:** European call, $S = 100$, $K = 100$, $r = 0.05$, $q = 0.02$, $\sigma = 0.20$, $T = 1.0$. Reference: analytical Black-Scholes $V_{\text{BS}} = 9.22701$. Joint space-time refinement: $N_t = 4 N_x$ across 7 levels ($N_x \in \{25, 50, 100, 200, 400, 800, 1600\}$). Value extraction via solver interpolation (`valueAt`).
 
-**Figure 5:** `fig5_convergence.pdf` — Grid convergence (log-log) of absolute error versus spatial grid size for all three schemes. All converge at $O(h^2)$ rate. MilevTaglianiCN shows approximately 1.7× the absolute error of SC at coarse grids (e.g., $4.23 \times 10^{-2}$ vs. $2.50 \times 10^{-2}$ at $N_x = 25$) due to its first-order time component, but achieves the same asymptotic convergence rate.
+**Figure 5:** `fig5_convergence.pdf` — Grid convergence (log-log) of absolute error versus spatial grid size for all three schemes. All converge at $O(h^2)$ rate. MilevTaglianiCN shows approximately 1.7× the absolute error of SC at coarse grids (e.g., $4.23 \times 10^{-2}$ vs. $2.50 \times 10^{-2}$ at $N_x = 25$) due to the additional artificial diffusion from its modified spatial operator, but achieves the same asymptotic convergence rate.
 
 **Table 2: Grid Convergence**
 
@@ -409,7 +409,7 @@ Convergence rate $\alpha$ is computed as $\log_2(\text{error}_{i}/\text{error}_{
 
 | Condition | Recommended Scheme | Rationale |
 |-----------|-------------------|-----------|
-| $|\text{Pe}| \leq 1$ (e.g., $\sigma^2 > r$, moderate $h$) | StandardCentral | Maximum accuracy, no artificial diffusion |
+| $|\text{Pe}| < 1$ (low drift relative to diffusion) | StandardCentral | Maximum accuracy, no artificial diffusion |
 | General robustness needed | ExponentialFitting | Guaranteed M-matrix for all parameters; moderate overhead (~1.8× wall time) |
 | Low-vol regime, CN time scheme | MilevTaglianiCN | Alternative to EF with different artificial diffusion profile; requires CN-equivalent time stepping |
 | Unknown parameter regime | ExponentialFitting with `FallbackToExponentialFitting` | Safety net eliminates configuration risk |
@@ -458,7 +458,7 @@ We have presented a comprehensive implementation of three spatial discretization
 **Practical recommendations:**
 
 - Use **ExponentialFitting** as the default scheme for robustness across all parameter regimes.
-- Use **StandardCentral** when $|\text{Pe}| \leq 1$ (typically $\sigma^2 > r$ with moderate grid spacing) and maximum accuracy is needed.
+- Use **StandardCentral** when $|\text{Pe}| < 1$ (i.e., the mesh resolves the drift-to-diffusion ratio) and maximum accuracy is needed.
 - Use **MilevTaglianiCN** only when CN time stepping is already mandated and the problem is in the low-volatility regime.
 - Enable **`FallbackToExponentialFitting`** in production to handle unexpected parameter combinations.
 
@@ -470,41 +470,45 @@ We have presented a comprehensive implementation of three spatial discretization
 
 ### Proof of Theorem 2.1 (CN Positivity in Log-Space)
 
-Consider the Crank-Nicolson scheme applied to the log-space Black-Scholes PDE (Equation 2) on a uniform mesh with spacing $h$ and $M$ interior nodes. The scheme produces $P\mathbf{V}^{n+1} = N\mathbf{V}^n$ with:
+Consider the Crank-Nicolson scheme applied to the log-space Black-Scholes PDE (Equation 2) on a uniform mesh with spacing $h$ and $M$ interior nodes. The spatial operator is:
 
-$$P = \frac{1}{\Delta t}I + C, \qquad N = \frac{1}{\Delta t}I - C$$
+$$A = \text{tridiag}\left\{\frac{\sigma^2}{2h^2} - \frac{\mu}{2h};\ -\frac{\sigma^2}{h^2} - r;\ \frac{\sigma^2}{2h^2} + \frac{\mu}{2h}\right\}$$
 
-where
+with off-diagonals $A^- = \sigma^2/(2h^2) - \mu/(2h)$ and $A^+ = \sigma^2/(2h^2) + \mu/(2h)$. The CN scheme yields $P\mathbf{V}^{n+1} = N\mathbf{V}^n$ with:
 
-$$C = \text{tridiag}\left\{c^-;\ c^0;\ c^+\right\}$$
+$$P = \frac{1}{\Delta t}I - \frac{1}{2}A, \qquad N = \frac{1}{\Delta t}I + \frac{1}{2}A$$
 
-with $c^- = -\frac{\sigma^2}{2h^2} + \frac{\mu}{2h}$, $c^0 = \frac{\sigma^2}{h^2} + \frac{r}{2}$, and $c^+ = -\frac{\sigma^2}{2h^2} - \frac{\mu}{2h}$.
+Define $C = -A/2$, so $P = (1/\Delta t)I + C$ and $N = (1/\Delta t)I - C$, with:
 
-Equivalently: $c^- = -(\sigma^2 - \mu h)/(2h^2)$ and $c^+ = -(\sigma^2 + \mu h)/(2h^2)$.
+$$C = \text{tridiag}\left\{-\frac{A^-}{2};\ \frac{\sigma^2}{2h^2} + \frac{r}{2};\ -\frac{A^+}{2}\right\}$$
 
-**Part 1:** Assume $|\text{Pe}| \leq 1$, i.e., $|\mu|h \leq \sigma^2$. Then $\sigma^2 - \mu h \geq \sigma^2 - |\mu|h \geq 0$ and $\sigma^2 + \mu h \geq \sigma^2 - |\mu|h \geq 0$, so both $c^- \leq 0$ and $c^+ \leq 0$. The diagonal of $P$ is $1/\Delta t + c^0 = 1/\Delta t + \sigma^2/h^2 + r/2 > 0$, and its off-diagonals are $c^- \leq 0$ and $c^+ \leq 0$. The row sum of $|$off-diagonals$|$ is $(\sigma^2 - \mu h)/(2h^2) + (\sigma^2 + \mu h)/(2h^2) = \sigma^2/h^2$, while the diagonal is $1/\Delta t + \sigma^2/h^2 + r/2 > \sigma^2/h^2$. So $P$ is strictly diagonally dominant, irreducible (tridiagonal with nonzero off-diagonals), and hence an M-matrix by [Windisch1989]. The bound $\|P^{-1}\|_\infty \leq (1/\Delta t + r/2)^{-1}$ follows from the minimum excess: the minimum row sum is at least $1/\Delta t + r/2$.
+**Part 1:** Assume $|\text{Pe}| < 1$ (strictly), i.e., $|\mu|h < \sigma^2$. Then $A^- = (\sigma^2 - \mu h)/(2h^2) > 0$ and $A^+ = (\sigma^2 + \mu h)/(2h^2) > 0$, so both off-diagonals of $C$ are strictly negative. The diagonal of $P$ is $1/\Delta t + \sigma^2/(2h^2) + r/2 > 0$. The sum of $|$off-diagonal$|$ magnitudes per row is $A^-/2 + A^+/2 = \sigma^2/(2h^2)$, which is strictly less than the diagonal $1/\Delta t + \sigma^2/(2h^2) + r/2$. So $P$ is strictly diagonally dominant, irreducible (tridiagonal with strictly nonzero off-diagonals under $|\text{Pe}| < 1$), and hence an M-matrix by [Windisch1989] with $P^{-1} > 0$. The bound $\|P^{-1}\|_\infty \leq (1/\Delta t + r/2)^{-1}$ follows from the minimum row excess.
 
-**Part 2:** The off-diagonals of $N$ are $-c^- = (\sigma^2 - \mu h)/(2h^2) \geq 0$ and $-c^+ = (\sigma^2 + \mu h)/(2h^2) \geq 0$ (from Part 1). The diagonal of $N$ is $1/\Delta t - c^0 = 1/\Delta t - \sigma^2/h^2 - r/2$. For $N \geq 0$, we need this diagonal non-negative: $1/\Delta t \geq \sigma^2/h^2 + r/2$, giving:
+**Part 2:** The off-diagonals of $N$ are $A^-/2 > 0$ and $A^+/2 > 0$ (from Part 1). The diagonal of $N$ is $1/\Delta t - \sigma^2/(2h^2) - r/2$. For $N \geq 0$:
 
 $$\Delta t < \frac{2}{r + 2\sigma^2/h^2} \qquad (A1)$$
 
-With $N \geq 0$ and $P^{-1} > 0$, positivity follows: $\mathbf{V}^{n+1} = P^{-1}N\mathbf{V}^n > 0$ when $\mathbf{V}^0 \geq 0$. The row sum of $N$ is $\|N\|_\infty = 1/\Delta t - r/2$, so $\|P^{-1}\|_\infty \|N\|_\infty \leq (1/\Delta t - r/2)/(1/\Delta t + r/2) < 1$, establishing the discrete maximum principle.
+With $N \geq 0$ and $P^{-1} > 0$: $\mathbf{V}^{n+1} = P^{-1}N\mathbf{V}^n > 0$ when $\mathbf{V}^0 \geq 0$. The row sum $\|N\|_\infty = 1/\Delta t - r/2$, so $\|P^{-1}\|_\infty \|N\|_\infty \leq (1/\Delta t - r/2)/(1/\Delta t + r/2) < 1$, establishing the discrete maximum principle.
 
-**Part 3:** Since $c^- \leq 0$ and $c^+ \leq 0$, the matrix $C$ has off-diagonals of the same sign (both negative or zero). Hence $C$ is similar to a symmetric tridiagonal (Jacobi) matrix [Ortega1990] with real, distinct eigenvalues in $[r/2,\ r/2 + 2\sigma^2/h^2]$ (Gershgorin bounds). The eigenvalues of $P^{-1}N$ are:
+**Part 3:** Under $|\text{Pe}| < 1$, $C$ has strictly negative off-diagonals $(-A^-/2 < 0$ and $-A^+/2 < 0)$ with the product $(-A^-/2)(-A^+/2) > 0$. Hence $C$ is a Jacobi matrix [Ortega1990], similar to a symmetric tridiagonal with $M$ real, distinct eigenvalues in $[r/2,\ r/2 + \sigma^2/h^2]$ (Gershgorin bounds). The eigenvalues of $P^{-1}N$ are:
 
 $$\lambda_i(P^{-1}N) = \frac{1 - \Delta t \lambda_i(C)}{1 + \Delta t \lambda_i(C)}$$
 
-Under condition (A1), $\Delta t \lambda_i(C) < 1$ for all $i$, so $\lambda_i(P^{-1}N) \in (0, 1)$. Distinctness is inherited from the distinctness of $\lambda_i(C)$. $\square$
+Under condition (A1), $\Delta t \lambda_i(C) < 1$ for all $i$, so $\lambda_i(P^{-1}N) \in (0, 1)$ and distinct. $\square$
 
 ### Discussion: MT Positivity (Observation 2.2)
 
-The shipped log-space MT operator assembles the tridiagonal matrix via `mapT_.axpyb(drift, dxMap_, dxxMap_.mult(aUsed), Array(1, -r))` where `aUsed` contains the per-node effective diffusion $a_{\text{eff},i} = \sigma^2/2 + \min(r^2h_i^2/(8\sigma^2),\ R_{\max}\sigma^2/2)$. This is not the same as the S-space 6-point stencil in [MilevTagliani2010a, Section 3.2], so the formal proof of [MilevTagliani2010a, Theorem 3.2] does not directly apply to the shipped operator.
+The shipped log-space MT operator assembles the spatial operator via `mapT_.axpyb(drift, dxMap_, dxxMap_.mult(aUsed), Array(1, -r))`, producing:
 
-What can be stated rigorously is:
-- The **implicit matrix** $P$ has off-diagonals $-a_{\text{eff}}/(h^2)$ which are always negative, and diagonal $2a_{\text{eff}}/h^2 + r > 0$, so $P$ is an M-matrix for any $a_{\text{eff}} > 0$.
-- The **explicit matrix** $N$ retains the centered-difference drift and the reaction term. Its off-diagonals are $\sigma^2/(2h^2) \mp \mu/(2h)$, which may be negative when $|\text{Pe}| > 1$ — the same condition as StandardCentral.
+$$A_{\text{MT}} = \text{tridiag}\left\{\frac{a_{\text{eff}}}{h^2} - \frac{\mu}{2h};\ -\frac{2a_{\text{eff}}}{h^2} - r;\ \frac{a_{\text{eff}}}{h^2} + \frac{\mu}{2h}\right\}$$
 
-The MT scheme's additional diffusion in $P$ improves conditioning but does not directly fix the sign of $N$'s off-diagonals. In practice, the combination of the diffusion-enhanced $P$ (with $P^{-1} > 0$) and the CN time-stepping structure produces positive solutions in the tested parameter regimes. The `FallbackToExponentialFitting` mechanism provides a safety net when M-matrix diagnostics detect violations. $\square$
+where $a_{\text{eff}} = \sigma^2/2 + \min(r^2h^2/(8\sigma^2),\ R_{\max}\sigma^2/2)$. The CN matrices are $P = (1/\Delta t)I - (1/2)A_{\text{MT}}$ and $N = (1/\Delta t)I + (1/2)A_{\text{MT}}$.
+
+The off-diagonals of $P$ are $-(a_{\text{eff}}/(2h^2) - \mu/(4h))$ and $-(a_{\text{eff}}/(2h^2) + \mu/(4h))$. These contain the drift term $\mu$ — they are **not** simply $-a_{\text{eff}}/h^2$. For $P$ to be an M-matrix, both off-diagonals must be non-positive, requiring $a_{\text{eff}}/h^2 > |\mu|/(2h)$, i.e., $a_{\text{eff}} > |\mu|h/2$. The added diffusion $r^2h^2/(8\sigma^2)$ helps satisfy this condition: the effective Péclet number $\text{Pe}_{\text{eff}} = \mu h / (2a_{\text{eff}})$ is reduced. In the low-volatility regime where the MT scheme is designed to operate, the added diffusion dominates and this condition is satisfied.
+
+Similarly, the off-diagonals of $N$ are $a_{\text{eff}}/(2h^2) \mp \mu/(4h)$, which can still become negative when $|\mu|h > 2a_{\text{eff}}$ — a condition that the `FallbackToExponentialFitting` M-matrix diagnostic detects at runtime.
+
+This is not the same matrix structure as the S-space 6-point stencil in [MilevTagliani2010a, Section 3.2], so the formal proof of [MilevTagliani2010a, Theorem 3.2] does not directly apply. In tested parameter regimes ($\sigma \leq 0.5$, $r \leq 0.05$, $q \geq 0$), the scheme produces positive solutions. The test `testNegativeDividendYieldMMatrixFallback` demonstrates that edge cases (e.g., $q < 0$ on a coarse mesh) can violate the M-matrix condition, triggering the fallback safety net. $\square$
 
 ---
 
@@ -575,7 +579,7 @@ cd .. && python plot_figures.py   # writes PDF to figures/
 | Artificial diffusion | None | $(\sigma^2/2)(\rho - 1)$ | $r^2 h^2 / (8\sigma^2)$ |
 | Time scheme | Any | Any | CN-equivalent only |
 | Overhead vs. SC | 1.0× | ~1.8× | ~1.4× |
-| Recommended use | $|\text{Pe}| \leq 1$, smooth data | Universal default | Low-vol with CN |
+| Recommended use | $|\text{Pe}| < 1$, smooth data | Universal default | Low-vol with CN |
 
 ---
 
