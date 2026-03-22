@@ -326,7 +326,7 @@ With $|\text{Pe}| \ll 1$ at every node on the concentrated mesh, all three FD sc
 
 **Parameters:** $K = 100$, $\sigma = 0.001$, $r = 0.05$, $q = 0$, $L = 95$, $U = 110$, $T = 1.0$, 5 monitoring dates. Grid: $800$-node uniform mesh (`Uniform1dMesher` over $[\ln 80, \ln 130]$).
 
-At $\sigma = 0.001$ ($\sigma^2 = 10^{-6} \ll r = 0.05$), the Péclet number is extremely large. StandardCentral produces **37 negative grid nodes** — a direct M-matrix violation. ExponentialFitting maintains positivity throughout. MilevTaglianiCN maintains positivity but shows visible undershoot near the barriers due to the large artificial diffusion: $(r^2 h^2)/(8\sigma^2)$ grows as $O(1/\sigma^2)$, introducing smoothing that flattens the price profile near the barriers. The Monte Carlo reference uses $5 \times 10^6$ paths.
+At $\sigma = 0.001$, the Péclet number is extremely large ($|\text{Pe}| \gg 1$ on this mesh). StandardCentral produces **37 negative grid nodes** — a direct M-matrix violation. ExponentialFitting maintains positivity throughout. MilevTaglianiCN maintains positivity but shows visible undershoot near the barriers due to the large artificial diffusion: $(r^2 h^2)/(8\sigma^2)$ grows as $O(1/\sigma^2)$, introducing smoothing that flattens the price profile near the barriers. The Monte Carlo reference uses $5 \times 10^6$ paths.
 
 **Figure 4:** `fig4_barrier_lowvol.pdf` — Discrete double barrier knock-out call prices at low volatility ($\sigma = 0.001$) for all three FD schemes with Monte Carlo reference. StandardCentral produces negative prices (shaded region) near the barriers, while ExponentialFitting and MilevTaglianiCN maintain positivity. MilevTaglianiCN shows visible undershoot near the barriers due to large artificial diffusion.
 
@@ -343,14 +343,14 @@ At $\sigma = 0.001$ ($\sigma^2 = 10^{-6} \ll r = 0.05$), the Péclet number is e
 | $N_x$ | $N_t$ | SC Error | SC $\alpha$ | EF Error | EF $\alpha$ | MT Error | MT $\alpha$ |
 |-------:|-------:|---------:|------:|---------:|------:|---------:|------:|
 | 25 | 100 | 2.50e-02 | — | 2.60e-02 | — | 4.23e-02 | — |
-| 50 | 200 | 6.59e-03 | 1.92 | 6.81e-03 | 1.93 | 1.07e-02 | 1.98 |
+| 50 | 200 | 6.59e-03 | 1.93 | 6.81e-03 | 1.93 | 1.07e-02 | 1.98 |
 | 100 | 400 | 1.63e-03 | 2.02 | 1.68e-03 | 2.02 | 2.64e-03 | 2.02 |
-| 200 | 800 | 4.05e-04 | 2.01 | 4.19e-04 | 2.00 | 6.56e-04 | 2.01 |
-| 400 | 1600 | 1.01e-04 | 2.00 | 1.04e-04 | 2.01 | 1.63e-04 | 2.01 |
-| 800 | 3200 | 2.51e-05 | 2.01 | 2.59e-05 | 2.01 | 4.06e-05 | 2.01 |
-| 1600 | 6400 | 6.27e-06 | 2.00 | 6.47e-06 | 2.00 | 1.01e-05 | 2.01 |
+| 200 | 800 | 4.05e-04 | 2.00 | 4.19e-04 | 2.00 | 6.56e-04 | 2.01 |
+| 400 | 1600 | 1.01e-04 | 2.01 | 1.04e-04 | 2.01 | 1.63e-04 | 2.01 |
+| 800 | 3200 | 2.51e-05 | 2.00 | 2.59e-05 | 2.00 | 4.06e-05 | 2.00 |
+| 1600 | 6400 | 6.27e-06 | 2.00 | 6.47e-06 | 2.00 | 1.01e-05 | 2.00 |
 
-Convergence rate $\alpha$ is computed as $\log_2(\text{error}_{i}/\text{error}_{i+1})$ between successive grid doublings. Average over last 4 levels: SC $\bar{\alpha} = 2.01$, EF $\bar{\alpha} = 2.01$, MT $\bar{\alpha} = 2.01$. All three schemes achieve the expected $O(h^2)$ rate. MT's approximately 1.6–1.7× error multiplier relative to SC (e.g., 1.69× at $N_x = 25$, stabilizing to ~1.6× at fine grids) reflects the additional artificial diffusion from the reaction-term discretization.
+Convergence rate $\alpha$ is computed as $\log_2(\text{error}_{i}/\text{error}_{i+1})$ from the exact CSV error values between successive grid doublings. Average over last 4 levels: SC $\bar{\alpha} = 2.01$, EF $\bar{\alpha} = 2.01$, MT $\bar{\alpha} = 2.01$. All three schemes achieve the expected $O(h^2)$ rate. MT's approximately 1.6–1.7× error multiplier relative to SC (e.g., 1.69× at $N_x = 25$, stabilizing to ~1.6× at fine grids) reflects the additional artificial diffusion from the reaction-term discretization.
 
 ### 4.7 Experiment 5: Effective Diffusion $\sigma$-Sweep (Figure 6)
 
