@@ -437,7 +437,7 @@ This study is subject to the following limitations:
    - Diffusion cap (`maxAddedDiffusionRatio = 10^6`) prevents extreme artificial diffusion
    - CN-only time scheme requirement enforced by the CN-equivalence gate
 
-5. **Value extraction:** Barrier experiments use nearest-node extraction; European experiments use interpolation. These produce different error characteristics and are not directly comparable.
+5. **Value extraction:** Nearest-node vs. interpolation methods are not directly comparable (see [Section 4.1](#41-value-extraction-methods)).
 
 6. **Benchmark non-portability:** Wall-clock times are machine-specific, compiler-dependent, and affected by system load. The deterministic cost metric $N_x \times N_t$ is the primary performance indicator.
 
@@ -447,13 +447,7 @@ This study is subject to the following limitations:
 
 We have presented a comprehensive implementation of three spatial discretization schemes for the Black-Scholes PDE within the QuantLib framework: StandardCentral (baseline Crank-Nicolson), ExponentialFitting (Duffy), and MilevTaglianiCNEffectiveDiffusion (Milev-Tagliani). The implementation operates in log-space, where the PDE has constant coefficients for flat-volatility models, and features a CN-equivalence gate, automatic fallback mechanism, and support for discretely monitored double barrier options.
 
-**Contributions:**
-
-1. **Log-space operator derivation.** Complete tridiagonal coefficient formulas for all three schemes in the $x = \ln S$ coordinate system, with an adapted proof of the CN positivity theorem and empirical characterization of the MT scheme's behavior.
-
-2. **Robust QuantLib integration.** The `FdmBlackScholesSpatialDesc` configuration struct, CN-equivalence gate, and `FallbackToExponentialFitting` policy provide a production-ready interface that eliminates configuration risk.
-
-3. **Comprehensive numerical validation.** Eight experiment groups covering truncated calls, discrete barriers at moderate and low volatility, grid convergence, effective diffusion diagnostics, M-matrix analysis, performance benchmarks, and Péclet number regime visualization.
+The paper's contributions — log-space operator derivation with adapted CN positivity proof, robust QuantLib integration with CN-equivalence gate and fallback, and comprehensive numerical validation across eight experiment groups — are detailed in [Section 1](#1-introduction).
 
 **Practical recommendations:**
 
@@ -542,25 +536,7 @@ ExponentialFitting runs approximately 1.8× slower than StandardCentral, reflect
 
 ## Appendix C: Reproducibility
 
-### Source Artifacts
-
-| Output | Source |
-|--------|--------|
-| Figure 1 | `fig1_cn_oscillations.pdf` from `truncated_call_{SC,reference}.csv` |
-| Figure 2 | `fig2_three_scheme_truncated.pdf` from `truncated_call_{SC,EF,MT,reference}.csv` |
-| Figure 3 | `fig3_barrier_moderate.pdf` from `barrier_moderate_vol_{SC,EF,MT}.csv`, `mc_barrier_moderate_vol.csv` |
-| Figure 4 | `fig4_barrier_lowvol.pdf` from `barrier_low_vol_{SC,EF,MT}.csv`, `mc_barrier_low_vol.csv` |
-| Figure 5 | `fig5_convergence.pdf` from `grid_convergence_{SC,EF,MT}.csv` |
-| Figure 6 | `fig6_effective_diffusion.pdf` from `effective_diffusion_sweep_{SC,EF,MT}.csv` |
-| Figure 7 | `fig7_mmatrix.pdf` from `mmatrix_sweep_{SC,EF,MT}.csv` |
-| Figure 8 | `fig8_benchmark.pdf` from `benchmark_{SC,EF,MT}.csv` |
-| Figure 9 | `fig9_xcothx.pdf` from `xcothx.csv` |
-| Table 1 | `barrier_moderate_vol_{SC,EF,MT}.csv`, `mc_barrier_moderate_vol.csv` |
-| Table 2 | `grid_convergence_{SC,EF,MT}.csv` |
-| Table 3 | `benchmark_{SC,EF,MT}.csv` |
-| Table 4 | Derived from experiments 4–7 |
-
-### Build and Run
+The experiment traceability table in [Section 4](#4-numerical-experiments) maps each figure and table to its source CSV files. To regenerate all data and figures from source:
 
 ```bash
 cd results/build && cmake .. && make
