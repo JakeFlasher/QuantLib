@@ -486,7 +486,7 @@ With $N \geq 0$ and $P^{-1} > 0$: $\mathbf{V}^{n+1} = P^{-1}N\mathbf{V}^n \geq 0
 
 *Remark.* When $r > 0$, the inequality is strict: $\|P^{-1}N\|_\infty < 1$, giving strict contraction. When $r = 0$, the ratio equals 1, so only the non-strict bound $\|P^{-1}N\|_\infty \leq 1$ holds — the solution norm is preserved but not contracted.
 
-**Part 3:** Under $|\text{Pe}| < 1$, $C$ has strictly negative off-diagonals $(-A^-/2 < 0$ and $-A^+/2 < 0)$ with the product $(-A^-/2)(-A^+/2) > 0$. Define the diagonal similarity $D = \text{diag}((A^+/A^-)^{k/2})_{k=1}^M$. Then $\tilde{C} = D^{-1}CD$ is a symmetric tridiagonal with diagonal $d = \sigma^2/(2h^2) + r/2$ and off-diagonal $\beta = \sqrt{A^- \cdot A^+}/2 = \frac{1}{2}\sqrt{(\sigma^2/(2h^2))^2 - (\mu/(2h))^2}$. By the explicit eigenvalue formula for symmetric tridiagonal matrices [Ortega1990]:
+**Part 3:** Under $|\text{Pe}| < 1$, $C$ has strictly negative off-diagonals $(-A^-/2 < 0$ and $-A^+/2 < 0)$ with the product $(-A^-/2)(-A^+/2) > 0$. Define the diagonal similarity $D = \text{diag}((A^-/A^+)^{k/2})_{k=1}^M$. Then $\tilde{C} = D^{-1}CD$ is a symmetric tridiagonal with diagonal $d = \sigma^2/(2h^2) + r/2$ and off-diagonal $-\beta$ where $\beta = \sqrt{A^- \cdot A^+}/2 = \frac{1}{2}\sqrt{(\sigma^2/(2h^2))^2 - (\mu/(2h))^2}$. By the explicit eigenvalue formula for symmetric tridiagonal matrices [Ortega1990]:
 
 $$\lambda_k(\tilde{C}) = d - 2\beta\cos\!\left(\frac{k\pi}{M+1}\right), \qquad k = 1, \ldots, M$$
 
