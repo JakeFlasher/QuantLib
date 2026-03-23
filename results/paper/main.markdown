@@ -132,7 +132,7 @@ The M-matrix property of $P$ ensures $P^{-1} \geq 0$, which is a sufficient cond
 
 $$A^-_i = \frac{a_{\text{eff}}}{h^2} - \frac{\mu}{2h} = \frac{\sigma^2}{2h^2}\left(\rho(\text{Pe}) - \text{Pe}\right)$$
 
-Since $\rho(\text{Pe}) = \text{Pe} \cdot \coth(\text{Pe}) \geq |\text{Pe}| \geq \text{Pe}$ for all $\text{Pe}$, we have $A^-_i \geq 0$. Similarly, $A^+_i = \frac{\sigma^2}{2h^2}(\rho(\text{Pe}) + \text{Pe}) \geq 0$ since $\rho(\text{Pe}) \geq |\text{Pe}| \geq -\text{Pe}$. The CN implicit matrix $P = (1/\Delta t)I - (1/2)A$ has off-diagonals $-A^-_i/2 \leq 0$ and $-A^+_i/2 \leq 0$, and diagonal $p_{ii} = 1/\Delta t + a_{\text{eff}}/h^2 + r/2$. The row off-diagonal sum is $A^-_i/2 + A^+_i/2 = a_{\text{eff}}/h^2$, so the diagonal excess is $p_{ii} - a_{\text{eff}}/h^2 = 1/\Delta t + r/2 > 0$, establishing strict diagonal dominance. Since $P$ is a strictly diagonally dominant Z-matrix (positive diagonal, non-positive off-diagonals), it is a nonsingular M-matrix with $P^{-1} \geq 0$. $\square$
+Since $\rho(\text{Pe}) = \text{Pe} \cdot \coth(\text{Pe}) \geq |\text{Pe}| \geq \text{Pe}$ for all $\text{Pe}$, we have $A^-_i \geq 0$. Similarly, $A^+_i = \frac{\sigma^2}{2h^2}(\rho(\text{Pe}) + \text{Pe}) \geq 0$ since $\rho(\text{Pe}) \geq |\text{Pe}| \geq -\text{Pe}$. The CN implicit matrix $P = (1/\Delta t)I - (1/2)A$ has off-diagonals $-A^-_i/2 \leq 0$ and $-A^+_i/2 \leq 0$, and diagonal $p_{ii} = 1/\Delta t + a_{\text{eff}}/h^2 + r/2$. The row off-diagonal sum is $A^-_i/2 + A^+_i/2 = a_{\text{eff}}/h^2$, so the diagonal excess is $p_{ii} - a_{\text{eff}}/h^2 = 1/\Delta t + r/2 > 0$, establishing strict diagonal dominance. Since $P$ is a strictly diagonally dominant Z-matrix (positive diagonal, non-positive off-diagonals), it is a nonsingular M-matrix with $P^{-1} > 0$. $\square$
 
 **StandardCentral off-diagonal sign violation.** When $|\text{Pe}| > 1$, the StandardCentral spatial operator off-diagonal $\sigma^2/(2h^2) - |\mu|/(2h)$ becomes negative, meaning $P$ loses the M-matrix property. The critical volatility below which this occurs is approximately $\sigma_{\text{crit}} \approx 0.02$ for typical parameters (see Experiment 6, Figure 7).
 
@@ -490,7 +490,7 @@ With $N \geq 0$ and $P^{-1} > 0$: $\mathbf{V}^{n+1} = P^{-1}N\mathbf{V}^n \geq 0
 
 $$\lambda_k(\tilde{C}) = d - 2\beta\cos\!\left(\frac{k\pi}{M+1}\right), \qquad k = 1, \ldots, M$$
 
-Since $|\text{Pe}| < 1$ implies $|\mu|h < \sigma^2$, we have $\beta < \sigma^2/(4h^2) = d/2 - r/4 \leq d/2$, so $d - 2\beta > 0$ even when $r = 0$, ensuring all eigenvalues are positive. By Gershgorin, $\lambda_k(C) = \lambda_k(\tilde{C}) \in (0,\ \sigma^2/h^2 + r/2]$. The eigenvalues of $P^{-1}N$ are:
+Since $|\text{Pe}| < 1$ implies $|\mu|h < \sigma^2$, we have $\beta < \sigma^2/(4h^2) = d/2 - r/4 \leq d/2$, so $d - 2\beta > 0$ even when $r = 0$, ensuring all eigenvalues are positive. Since $C$ and $\tilde{C}$ are similar, they share eigenvalues; by Gershgorin applied to $\tilde{C}$, the maximum eigenvalue satisfies $\lambda_{\max}(C) \leq d + 2\beta \leq \sigma^2/h^2 + r/2$. The eigenvalues of $P^{-1}N$ are:
 
 $$\lambda_i(P^{-1}N) = \frac{1 - \Delta t \lambda_i(C)}{1 + \Delta t \lambda_i(C)}$$
 
