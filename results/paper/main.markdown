@@ -36,11 +36,11 @@ This paper presents an implementation of all three schemes — StandardCentral, 
 
 ### 2.1 The Black-Scholes PDE
 
-In the standard formulation, the option price $V(S, t)$ satisfies the Black-Scholes PDE:
+In the standard formulation, the option price $V(S, t)$ satisfies the Black-Scholes PDE, where $t$ denotes calendar time ($t = 0$ at valuation, $t = T$ at maturity) and the finite difference solver rolls **backward** from the terminal payoff at $t = T$ to the present value at $t = 0$:
 
 $$-\frac{\partial V}{\partial t} + (r - q) S \frac{\partial V}{\partial S} + \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} - rV = 0 \qquad (1)$$
 
-where $r$ is the risk-free rate, $q$ is the continuous dividend yield, and $\sigma$ is the volatility.
+where $r$ is the risk-free rate, $q$ is the continuous dividend yield, and $\sigma$ is the volatility. The leading $-\partial V / \partial t$ sign is the standard convention for calendar time; the equivalent time-to-maturity form $\partial V / \partial \tau$ (with $\tau = T - t$) reverses this sign.
 
 Under the log-space transformation $x = \ln S$, Equation (1) becomes:
 
