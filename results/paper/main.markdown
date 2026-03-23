@@ -132,7 +132,7 @@ The M-matrix property of $P$ ensures $P^{-1} \geq 0$, which is a sufficient cond
 
 $$A^-_i = \frac{a_{\text{eff}}}{h^2} - \frac{\mu}{2h} = \frac{\sigma^2}{2h^2}\left(\rho(\text{Pe}) - \text{Pe}\right)$$
 
-Since $\rho(\text{Pe}) = \text{Pe} \cdot \coth(\text{Pe}) \geq |\text{Pe}| \geq \text{Pe}$ for all $\text{Pe}$, we have $A^-_i \geq 0$. Similarly, $A^+_i = \frac{\sigma^2}{2h^2}(\rho(\text{Pe}) + \text{Pe}) \geq 0$ since $\rho(\text{Pe}) \geq |\text{Pe}| \geq -\text{Pe}$. The off-diagonals of $P$ are $-A^-_i/2 \leq 0$ and $-A^+_i/2 \leq 0$, with positive diagonal $1/\Delta t - A^0/2 > 0$, so $P$ is an M-matrix. $\square$
+Since $\rho(\text{Pe}) = \text{Pe} \cdot \coth(\text{Pe}) \geq |\text{Pe}| \geq \text{Pe}$ for all $\text{Pe}$, we have $A^-_i \geq 0$. Similarly, $A^+_i = \frac{\sigma^2}{2h^2}(\rho(\text{Pe}) + \text{Pe}) \geq 0$ since $\rho(\text{Pe}) \geq |\text{Pe}| \geq -\text{Pe}$. The CN implicit matrix $P = (1/\Delta t)I - (1/2)A$ has off-diagonals $-A^-_i/2 \leq 0$ and $-A^+_i/2 \leq 0$, and diagonal $p_{ii} = 1/\Delta t + a_{\text{eff}}/h^2 + r/2$. The row off-diagonal sum is $A^-_i/2 + A^+_i/2 = a_{\text{eff}}/h^2$, so the diagonal excess is $p_{ii} - a_{\text{eff}}/h^2 = 1/\Delta t + r/2 > 0$, establishing strict diagonal dominance. Since $P$ is a strictly diagonally dominant Z-matrix (positive diagonal, non-positive off-diagonals), it is a nonsingular M-matrix with $P^{-1} \geq 0$. $\square$
 
 **StandardCentral off-diagonal sign violation.** When $|\text{Pe}| > 1$, the StandardCentral spatial operator off-diagonal $\sigma^2/(2h^2) - |\mu|/(2h)$ becomes negative, meaning $P$ loses the M-matrix property. The critical volatility below which this occurs is approximately $\sigma_{\text{crit}} \approx 0.02$ for typical parameters (see Experiment 6, Figure 7).
 
@@ -145,12 +145,12 @@ The following results are adapted from [MilevTagliani2010a] for the log-space fo
 *If $|\text{Pe}| < 1$ (strictly; equivalently $|\mu|h < \sigma^2$), then:*
 
 1. *$P$ has positive diagonal, strictly negative off-diagonals, and is an irreducible, strictly diagonally dominant M-matrix (Definition 2.2) with $P^{-1} > 0$ and $\|P^{-1}\|_\infty \leq (1/\Delta t + r/2)^{-1}$.*
-2. *If additionally $\Delta t < 2/(r + 2\sigma^2/h^2)$, then $N \geq 0$, the numerical solution preserves positivity, and the discrete maximum principle holds.*
-3. *Under the same $\Delta t$ bound, $P^{-1}N$ has $M$ distinct real eigenvalues in $(0, 1)$.*
+2. *If additionally $\Delta t \leq 2/(r + \sigma^2/h^2)$, then $N \geq 0$ and the numerical solution preserves positivity. The discrete maximum principle $\|P^{-1}N\|_\infty \leq 1$ holds for $r \geq 0$; for $r > 0$ the strict contraction $\|P^{-1}N\|_\infty < 1$ holds.*
+3. *If $\Delta t < 2/(r + 2\sigma^2/h^2)$ (a stricter bound than Part 2), then $P^{-1}N$ has $M$ distinct real eigenvalues in $(0, 1)$.*
 
 *At the boundary $|\text{Pe}| = 1$, one off-diagonal of $A$ vanishes, $P$ becomes bidiagonal, and the strict conclusions (positive inverse, distinct eigenvalues) may not hold.*
 
-*Proof sketch.* The off-diagonals of $P$ are $-A^-/2 = -\sigma^2/(4h^2) + \mu/(4h)$ and $-A^+/2 = -\sigma^2/(4h^2) - \mu/(4h)$. Under $|\text{Pe}| < 1$ (i.e., $|\mu|h < \sigma^2$), both $A^- > 0$ and $A^+ > 0$, so both off-diagonals of $P$ are strictly negative. The diagonal of $P$ is $1/\Delta t + \sigma^2/(2h^2) + r/2 > 0$, making $P$ strictly diagonally dominant with non-positive off-diagonals — an irreducible M-matrix. For $N \geq 0$, we need the diagonal non-negative: $1/\Delta t - \sigma^2/(2h^2) - r/2 \geq 0$, giving $\Delta t < 2/(r + 2\sigma^2/h^2)$. The off-diagonals of $N$ are $A^-/2 > 0$ and $A^+/2 > 0$. The eigenvalue analysis follows from writing $P = (1/\Delta t)I + C$ and $N = (1/\Delta t)I - C$ with $C = -A/2$, yielding $\lambda_i(P^{-1}N) = (1 - \Delta t\lambda_i(C))/(1 + \Delta t\lambda_i(C))$. The full proof is in [Appendix A](#appendix-a-proof-of-theorem-21-and-mt-discussion).
+*Proof sketch.* The off-diagonals of $P$ are $-A^-/2 = -\sigma^2/(4h^2) + \mu/(4h)$ and $-A^+/2 = -\sigma^2/(4h^2) - \mu/(4h)$. Under $|\text{Pe}| < 1$ (i.e., $|\mu|h < \sigma^2$), both $A^- > 0$ and $A^+ > 0$, so both off-diagonals of $P$ are strictly negative. The diagonal of $P$ is $1/\Delta t + \sigma^2/(2h^2) + r/2 > 0$, making $P$ strictly diagonally dominant with non-positive off-diagonals — an irreducible M-matrix. For $N \geq 0$, we need the diagonal non-negative: $1/\Delta t - \sigma^2/(2h^2) - r/2 \geq 0$, giving $\Delta t \leq 2/(r + \sigma^2/h^2)$. The off-diagonals of $N$ are $A^-/2 > 0$ and $A^+/2 > 0$. The row sums give $\|P^{-1}\|_\infty \leq (1/\Delta t + r/2)^{-1}$ and $\|N\|_\infty = 1/\Delta t - r/2$, so $\|P^{-1}\|_\infty \|N\|_\infty \leq (1/\Delta t - r/2)/(1/\Delta t + r/2) \leq 1$, with strict inequality when $r > 0$. The eigenvalue analysis follows from writing $P = (1/\Delta t)I + C$ and $N = (1/\Delta t)I - C$ with $C = -A/2$, yielding $\lambda_i(P^{-1}N) = (1 - \Delta t\lambda_i(C))/(1 + \Delta t\lambda_i(C))$; under the stricter bound $\Delta t < 2/(r + 2\sigma^2/h^2)$, $\Delta t \lambda_i(C) < 1$ for all $i$, so all eigenvalues lie in $(0,1)$. The full proof is in [Appendix A](#appendix-a-proof-of-theorem-21-and-mt-discussion).
 
 *Remark.* The original S-space condition $\sigma^2 > r$ ([MilevTagliani2010a, Theorem 3.1]) does not transfer directly to log-space. In S-space, the Péclet number varies with $S_j$, and $\sigma^2 > r$ guarantees $|\text{Pe}| \leq 1$ at all nodes. In log-space, the Péclet number is constant across the mesh, and the correct condition is $|\text{Pe}| = |\mu|h/\sigma^2 \leq 1$, which depends on the mesh spacing $h$ and the full drift $\mu = r - q - \sigma^2/2$.
 
@@ -478,17 +478,23 @@ $$C = \text{tridiag}\left\{-\frac{A^-}{2};\ \frac{\sigma^2}{2h^2} + \frac{r}{2};
 
 **Part 1:** Assume $|\text{Pe}| < 1$ (strictly), i.e., $|\mu|h < \sigma^2$. Then $A^- = (\sigma^2 - \mu h)/(2h^2) > 0$ and $A^+ = (\sigma^2 + \mu h)/(2h^2) > 0$, so both off-diagonals of $C$ are strictly negative. The diagonal of $P$ is $1/\Delta t + \sigma^2/(2h^2) + r/2 > 0$. The sum of $|$off-diagonal$|$ magnitudes per row is $A^-/2 + A^+/2 = \sigma^2/(2h^2)$, which is strictly less than the diagonal $1/\Delta t + \sigma^2/(2h^2) + r/2$. So $P$ is strictly diagonally dominant, irreducible (tridiagonal with strictly nonzero off-diagonals under $|\text{Pe}| < 1$), and hence an M-matrix by [Windisch1989] with $P^{-1} > 0$. The bound $\|P^{-1}\|_\infty \leq (1/\Delta t + r/2)^{-1}$ follows from the minimum row excess.
 
-**Part 2:** The off-diagonals of $N$ are $A^-/2 > 0$ and $A^+/2 > 0$ (from Part 1). The diagonal of $N$ is $1/\Delta t - \sigma^2/(2h^2) - r/2$. For $N \geq 0$:
+**Part 2:** The off-diagonals of $N$ are $A^-/2 > 0$ and $A^+/2 > 0$ (from Part 1). The diagonal of $N$ is $1/\Delta t - \sigma^2/(2h^2) - r/2$. For $N \geq 0$, we need $1/\Delta t \geq \sigma^2/(2h^2) + r/2$, i.e.:
 
-$$\Delta t < \frac{2}{r + 2\sigma^2/h^2} \qquad (A1)$$
+$$\Delta t \leq \frac{2}{r + \sigma^2/h^2} \qquad (A1)$$
 
-With $N \geq 0$ and $P^{-1} > 0$: $\mathbf{V}^{n+1} = P^{-1}N\mathbf{V}^n > 0$ when $\mathbf{V}^0 \geq 0$. The row sum $\|N\|_\infty = 1/\Delta t - r/2$, so $\|P^{-1}\|_\infty \|N\|_\infty \leq (1/\Delta t - r/2)/(1/\Delta t + r/2) < 1$, establishing the discrete maximum principle.
+With $N \geq 0$ and $P^{-1} > 0$: $\mathbf{V}^{n+1} = P^{-1}N\mathbf{V}^n \geq 0$ when $\mathbf{V}^0 \geq 0$, establishing positivity preservation. The row sums give $\|N\|_\infty = 1/\Delta t - r/2$ and (from Part 1) $\|P^{-1}\|_\infty \leq (1/\Delta t + r/2)^{-1}$, so $\|P^{-1}\|_\infty \|N\|_\infty \leq (1/\Delta t - r/2)/(1/\Delta t + r/2) \leq 1$, establishing the non-strict discrete maximum principle for $r \geq 0$.
 
-**Part 3:** Under $|\text{Pe}| < 1$, $C$ has strictly negative off-diagonals $(-A^-/2 < 0$ and $-A^+/2 < 0)$ with the product $(-A^-/2)(-A^+/2) > 0$. Hence $C$ is a Jacobi matrix [Ortega1990], similar to a symmetric tridiagonal with $M$ real, distinct eigenvalues in $[r/2,\ r/2 + \sigma^2/h^2]$ (Gershgorin bounds). The eigenvalues of $P^{-1}N$ are:
+*Remark.* When $r > 0$, the inequality is strict: $\|P^{-1}N\|_\infty < 1$, giving strict contraction. When $r = 0$, the ratio equals 1, so only the non-strict bound $\|P^{-1}N\|_\infty \leq 1$ holds — the solution norm is preserved but not contracted.
+
+**Part 3:** Under $|\text{Pe}| < 1$, $C$ has strictly negative off-diagonals $(-A^-/2 < 0$ and $-A^+/2 < 0)$ with the product $(-A^-/2)(-A^+/2) > 0$. Define the diagonal similarity $D = \text{diag}((A^+/A^-)^{k/2})_{k=1}^M$. Then $\tilde{C} = D^{-1}CD$ is a symmetric tridiagonal with diagonal $d = \sigma^2/(2h^2) + r/2$ and off-diagonal $\beta = \sqrt{A^- \cdot A^+}/2 = \frac{1}{2}\sqrt{(\sigma^2/(2h^2))^2 - (\mu/(2h))^2}$. By the explicit eigenvalue formula for symmetric tridiagonal matrices [Ortega1990]:
+
+$$\lambda_k(\tilde{C}) = d - 2\beta\cos\!\left(\frac{k\pi}{M+1}\right), \qquad k = 1, \ldots, M$$
+
+Since $|\text{Pe}| < 1$ implies $|\mu|h < \sigma^2$, we have $\beta < \sigma^2/(4h^2) = d/2 - r/4 \leq d/2$, so $d - 2\beta > 0$ even when $r = 0$, ensuring all eigenvalues are positive. By Gershgorin, $\lambda_k(C) = \lambda_k(\tilde{C}) \in (0,\ \sigma^2/h^2 + r/2]$. The eigenvalues of $P^{-1}N$ are:
 
 $$\lambda_i(P^{-1}N) = \frac{1 - \Delta t \lambda_i(C)}{1 + \Delta t \lambda_i(C)}$$
 
-Under condition (A1), $\Delta t \lambda_i(C) < 1$ for all $i$, so $\lambda_i(P^{-1}N) \in (0, 1)$ and distinct. $\square$
+Under the bound $\Delta t < 2/(r + 2\sigma^2/h^2)$, we have $\Delta t \lambda_{\max}(C) \leq \Delta t(\sigma^2/h^2 + r/2) < 1$, so $\Delta t \lambda_i(C) \in (0, 1)$ for all $i$, giving $\lambda_i(P^{-1}N) \in (0, 1)$ and distinct (since the $\lambda_i(C)$ are distinct). $\square$
 
 ### Discussion: MT Positivity (Observation 2.2)
 
