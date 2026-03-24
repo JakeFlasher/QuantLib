@@ -196,18 +196,10 @@ namespace QuantLib {
         // callers (e.g. barrier engine parity composition) can
         // aggregate fallback info across sub-solves.
         {
+            const std::string requested = spatialDesc_.schemeName();
             const bool gating = solver->solverGatingTriggered();
             const bool mFallback = solver->mMatrixFallbackOccurred();
             const bool anyFallback = gating || mFallback;
-
-            std::string requested = "StandardCentral";
-            if (spatialDesc_.scheme ==
-                    FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting)
-                requested = "ExponentialFitting";
-            else if (spatialDesc_.scheme ==
-                    FdmBlackScholesSpatialDesc::Scheme
-                        ::MilevTaglianiCNEffectiveDiffusion)
-                requested = "MilevTaglianiCN";
 
             results_.additionalResults["spatialSchemeRequested"] =
                 requested;

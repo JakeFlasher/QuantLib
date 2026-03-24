@@ -24,7 +24,6 @@
 // r6
 #include <ql/exercise.hpp>
 #include <ql/instruments/vanillaoption.hpp>
-#include <ql/math/distributions/normaldistribution.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
 #include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
@@ -213,10 +212,7 @@ namespace QuantLib {
         if (   arguments_.barrierType == Barrier::DownIn
             || arguments_.barrierType == Barrier::UpIn) {
 
-            ext::shared_ptr<StrikedTypePayoff> payoff2 =
-                ext::dynamic_pointer_cast<StrikedTypePayoff>(
-                    arguments_.payoff);
-            VanillaOption vanillaOption(payoff2, arguments_.exercise);
+            VanillaOption vanillaOption(payoff, arguments_.exercise);
             vanillaOption.setPricingEngine(
                 ext::make_shared<FdBlackScholesVanillaEngine>(
                     process_, dividends_, tGrid_, xGrid_,
@@ -227,7 +223,7 @@ namespace QuantLib {
 
             BarrierOption rebateOption(
                 arguments_.barrierType, arguments_.barrier,
-                arguments_.rebate, payoff2, arguments_.exercise);
+                arguments_.rebate, payoff, arguments_.exercise);
 
             const Size min_grid_size = 50;
             const Size rebateDampingSteps =
@@ -480,14 +476,7 @@ namespace QuantLib {
             const ext::shared_ptr<FdmBlackScholesSolver>& mainSolver,
             const std::vector<const Instrument*>& subInstruments) const {
 
-        std::string requested = "StandardCentral";
-        if (spatialDesc_.scheme ==
-                FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting)
-            requested = "ExponentialFitting";
-        else if (spatialDesc_.scheme ==
-                FdmBlackScholesSpatialDesc::Scheme
-                    ::MilevTaglianiCNEffectiveDiffusion)
-            requested = "MilevTaglianiCN";
+        const std::string requested = spatialDesc_.schemeName();
 
         // Start with the main solver's state (if present).
         bool gating = mainSolver ? mainSolver->solverGatingTriggered() : false;

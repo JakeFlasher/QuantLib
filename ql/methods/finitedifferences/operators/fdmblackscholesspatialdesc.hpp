@@ -30,6 +30,7 @@
 #define quantlib_fdm_black_scholes_spatial_desc_hpp
 
 #include <ql/types.hpp>
+#include <string>
 
 namespace QuantLib {
 
@@ -115,6 +116,19 @@ namespace QuantLib {
         MMatrixPolicy mMatrixPolicy = MMatrixPolicy::FallbackToExponentialFitting;
         Real mMatrixEps     = 0.0;
         bool checkBoundaries = false;
+
+        //! Human-readable name for the current scheme, used in
+        //  additionalResults reporting across all FDM engines.
+        std::string schemeName() const {
+            switch (scheme) {
+              case Scheme::ExponentialFitting:
+                return "ExponentialFitting";
+              case Scheme::MilevTaglianiCNEffectiveDiffusion:
+                return "MilevTaglianiCN";
+              default:
+                return "StandardCentral";
+            }
+        }
 
         // ── Named factory methods ────────────────────────────────
         // Return pre-configured descriptors for common use cases.
