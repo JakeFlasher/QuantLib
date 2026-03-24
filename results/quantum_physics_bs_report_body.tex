@@ -1,0 +1,540 @@
+% Document body for: Black-Scholes as Quantum Evolution
+% Assumes IEEE journal template (IEEEtran class) with packages:
+%   amsmath, amssymb, amsthm, bm, hyperref, booktabs, listings,
+%   multirow, url loaded.  Preamble must include:
+%   \newtheorem{theorem}{Theorem}
+
+\title{Black-Scholes as Quantum Evolution:\\A Physics-Informed Analysis of Nonstandard Finite Difference Schemes}
+
+\author{[Authors]%
+\thanks{[Affiliation and contact information.]}
+}
+
+\maketitle
+
+\begin{abstract}
+We map the Black-Scholes finite difference framework---as implemented in the QuantLib Huatai fork---to paradigms from quantum mechanics and statistical physics.  The Black-Scholes equation is presented as an imaginary-time Schr\"{o}dinger equation via an exact gauge transformation, and the three spatial discretization schemes (StandardCentral, ExponentialFitting, MilevTaglianiCNEffectiveDiffusion) are interpreted through quantum and transport-physics lenses.  The Crank-Nicolson time propagator is analyzed as a Cayley-form operator, and discrete barrier monitoring is framed as projective measurement.  Each analogy is annotated as \textbf{exact}, \textbf{formal}, or \textbf{heuristic} to preserve intellectual honesty.  A 22-entry Finance-PDE-Physics dictionary and full code-traceability table are provided.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Black-Scholes equation, Schr\"{o}dinger equation, finite differences, exponential fitting, Scharfetter-Gummel, Crank-Nicolson, M-matrix, path integral, Feynman-Kac
+\end{IEEEkeywords}
+
+%======================================================================
+\section{The Quantum Nature of Finance}
+\label{sec:quantum-nature}
+%======================================================================
+
+\subsection{The Hidden Symmetry}
+
+The Black-Scholes equation describes how option price $V(S, t)$ evolves with the underlying asset price~$S$ and calendar time~$t$:
+\begin{equation}\label{eq:bs-original}
+  \frac{\partial V}{\partial t}
+  + (r - q)\,S\,\frac{\partial V}{\partial S}
+  + \frac{1}{2}\sigma^2 S^2\,\frac{\partial^2 V}{\partial S^2}
+  - r\,V = 0
+\end{equation}
+where $r$ is the risk-free rate, $q$ the continuous dividend yield, and $\sigma$ the volatility.  Variable coefficients~$S$ and~$S^2$ multiply every derivative, but the equation conceals a hidden symmetry.
+
+A stock dropping from 100 to 50 inflicts the same percentage loss as one dropping from 10 to 5.  This \emph{scale invariance} tells us that the natural coordinate is not the price~$S$ but its logarithm $x = \ln S$.  Because options have a terminal payoff at maturity~$T$, the natural time variable is time-to-maturity $\tau = T - t$, pointing the arrow of time from future payoff toward present value.
+
+\subsection{The Coordinate Transformation}
+
+Under $x = \ln S$ and $\tau = T - t$, with $U(x, \tau) = V(S, t)$, the chain rule gives \textbf{(exact)}:
+\begin{equation}\label{eq:bs-logspace}
+  \frac{\partial U}{\partial \tau}
+  = \frac{\sigma^2}{2}\,\frac{\partial^2 U}{\partial x^2}
+  + \mu\,\frac{\partial U}{\partial x}
+  - r\,U
+\end{equation}
+where $\mu = r - q - \sigma^2/2$ is the risk-neutral drift in log-space.  The variable coefficients have vanished.  What remains is a constant-coefficient convection-diffusion-reaction equation.
+
+The derivation is straightforward: $S\,\partial_S V = \partial_x U$ from the chain rule, and $S^2\,\partial_{SS} V = \partial_{xx} U - \partial_x U$ from differentiating again.  Substituting and reversing the time arrow via $\partial_t V = -\partial_\tau U$ yields the result.
+
+In the language of physics, this is a \emph{diffusion equation} with three terms: pure diffusion $(\sigma^2/2)\,U_{xx}$, advection bias $\mu\,U_x$ (the drift of the risk-neutral random walk), and amplitude decay $-rU$ (the time value of money).
+
+\subsection{The Gauge Transformation}
+
+To reveal the deepest structure, we perform a \emph{gauge transformation} \textbf{(exact)}.  Set
+\begin{equation}\label{eq:gauge}
+  U(x, \tau) = e^{-\alpha x - \beta \tau}\,\Psi(x, \tau).
+\end{equation}
+Computing derivatives and substituting into~\eqref{eq:bs-logspace}, we require the drift and decay terms to vanish.  This determines the gauge parameters uniquely:
+\begin{align}
+  \alpha &= \frac{\mu}{\sigma^2}
+         = \frac{r - q}{\sigma^2} - \frac{1}{2}, \label{eq:alpha} \\
+  \beta  &= r + \frac{\mu^2}{2\sigma^2}
+         = r + \frac{(r - q - \sigma^2/2)^2}{2\sigma^2}. \label{eq:beta}
+\end{align}
+The parameter~$\alpha$ removes the advection bias---it shifts to a co-moving frame traveling with the drift.  The parameter~$\beta$ absorbs both the discount rate and the residual kinetic energy of that drift.  What survives is
+\begin{equation}\label{eq:heat}
+  \frac{\partial \Psi}{\partial \tau}
+  = \frac{\sigma^2}{2}\,\frac{\partial^2 \Psi}{\partial x^2},
+\end{equation}
+the \emph{heat equation}---pure diffusion.
+
+\subsection{The Schr\"{o}dinger Correspondence}
+
+The free-particle Schr\"{o}dinger equation in one dimension reads
+\begin{equation}\label{eq:schrodinger}
+  i\hbar\,\frac{\partial \psi}{\partial t}
+  = -\frac{\hbar^2}{2m}\,\frac{\partial^2 \psi}{\partial x^2}.
+\end{equation}
+Under the \emph{Wick rotation} $t \to -i\tau$, the~$i$ on the left absorbs into the time derivative, giving the \emph{imaginary-time Schr\"{o}dinger equation}:
+\begin{equation}\label{eq:imag-time-schrodinger}
+  \frac{\partial \psi}{\partial \tau}
+  = \frac{\hbar}{2m}\,\frac{\partial^2 \psi}{\partial x^2}.
+\end{equation}
+Comparing with~\eqref{eq:heat}, the identification is immediate \textbf{(exact identity)}:
+\begin{equation}\label{eq:correspondence}
+  \frac{\sigma^2}{2} \;\longleftrightarrow\; \frac{\hbar}{2m_{\text{eff}}}.
+\end{equation}
+Setting $\hbar = 1$ (natural units), we obtain
+\begin{equation}\label{eq:effective-mass}
+  m_{\text{eff}} = \frac{1}{\sigma^2}.
+\end{equation}
+
+A low-volatility underlying is a \emph{heavy quantum particle}: its probability distribution diffuses slowly.  A major equity index with $\sigma = 0.15$ has $m_{\text{eff}} \approx 44$; a volatile altcoin with $\sigma = 1.0$ has $m_{\text{eff}} = 1$.
+
+This is not metaphor.  The gauge-transformed BS equation and the imaginary-time free-particle Schr\"{o}dinger equation are the same mathematical object.  What differs is the physical interpretation---and, critically, the absence of~$i$.
+
+\subsection{\texorpdfstring{Why No $i$?---Diffusion vs.\ Unitary Evolution}{Why No i?---Diffusion vs. Unitary Evolution}}
+
+The real-time Schr\"{o}dinger equation has $i$ on the left: $i\hbar\psi_t = H\psi$.  This~$i$ makes the evolution operator $e^{-iHt/\hbar}$ \emph{unitary}---it preserves $\|\psi\|^2 = 1$ forever.
+
+The Black-Scholes equation has no~$i$.  The evolution operator $e^{-H\tau}$ is a \emph{contraction semigroup}---it shrinks the solution.  Option values diffuse and decay; they do not oscillate.
+
+In quantum mechanics, probability is $\rho = |\psi|^2$; unitarity ensures its conservation.  In finance, the option price~$V$ is itself the probability-weighted expected value---there is no need to square anything.
+
+This distinction---\emph{unitary evolution vs.\ diffusive decay}---is the deepest point where the analogy reaches its limit \textbf{(formal analogy)}.
+
+\subsection{The Financial Hamiltonian}
+
+Before the gauge strip, the log-space BS equation reads
+\begin{equation}\label{eq:hamiltonian-decomp}
+  \partial_\tau U
+  = \underbrace{\frac{\sigma^2}{2}\,\partial_{xx} U}_{\text{kinetic energy}}
+  + \underbrace{\mu\,\partial_x U}_{\text{advection bias}}
+  - \underbrace{r\,U}_{\text{potential/discount}}.
+\end{equation}
+In quantum language \textbf{(formal analogy)}: the kinetic-energy operator $-(\sigma^2/2)\partial_{xx}$ governs diffusion; the advection bias $\mu\,\partial_x$ acts like a constant force field (more precisely, advection in the moving frame); the discount $-rU$ is a constant scalar potential $V_0 = r$.  Together, these define the \emph{financial Hamiltonian}:
+\begin{equation}\label{eq:financial-hamiltonian}
+  \hat{H}_{\text{BS}}
+  = -\frac{\sigma^2}{2}\,\partial_{xx}
+    - \mu\,\partial_x
+    + r.
+\end{equation}
+The log-space BS equation is then $\partial_\tau U = -\hat{H}_{\text{BS}}\,U$---\textbf{exactly} the imaginary-time Schr\"{o}dinger equation with a constant-potential Hamiltonian \textbf{(exact)} for the Euclidean interpretation.
+
+\subsection{Feynman-Kac: The Exact Path Integral}
+
+The deepest connection is not an analogy---it is a theorem.
+
+\begin{theorem}[Feynman-Kac, \textbf{exact}]\label{thm:feynman-kac}
+Let $X_t$ follow $dX_t = \mu\,dt + \sigma\,dW_t$ under the risk-neutral measure~$\mathbb{Q}$.  Then the solution to
+\begin{equation}
+  V_\tau = \frac{\sigma^2}{2}\,V_{xx} + \mu\,V_x - r\,V,
+  \quad V(x,0) = f(x)
+\end{equation}
+is given by $V(x, \tau) = \mathbb{E}^{\mathbb{Q}}_x\!\bigl[e^{-r\tau}\,f(X_\tau)\bigr]$.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+Define $Y_s = e^{-rs}\,V(X_s, \tau - s)$ and apply It\^{o}'s lemma.  The PDE ensures that the drift of~$Y$ vanishes, making~$Y$ a martingale.  Evaluating at $s = 0$ and $s = \tau$ yields the result.
+\end{proof}
+
+This is the financial incarnation of the \emph{Feynman path integral}.  In Euclidean quantum mechanics, the propagator is
+\begin{equation}\label{eq:path-integral}
+  K(x', \tau \mid x)
+  = \int_{x(0)=x}^{x(\tau)=x'} \mathcal{D}x\; e^{-S_E[x]},
+\end{equation}
+where $S_E$ is the Euclidean action.  For Black-Scholes \textbf{(exact via Wiener measure)}:
+\begin{equation}\label{eq:euclidean-action}
+  S_E[x] = \int_0^\tau
+    \left[\frac{(\dot{x} - \mu)^2}{2\sigma^2} + r\right] ds.
+\end{equation}
+The first term is the ``kinetic energy''---paths deviating from~$\mu$ are exponentially suppressed.  The second is the ``potential energy''---the discount applied along each path.  The Feynman-Kac theorem makes this rigorous as an exact mathematical identity; the physicist's notation $\int \mathcal{D}x\,e^{-S_E}$ is formal shorthand \textbf{(formal)} for this exact construction.
+
+\subsection{Risk-Neutral Measure and Wick Rotation}
+
+In QFT, the \emph{Wick rotation} $t \to -i\tau$ transforms the oscillatory Minkowski path integral into the convergent Euclidean one.  In finance, the \emph{Girsanov theorem} transforms the physical measure~$\mathbb{P}$ into the risk-neutral measure~$\mathbb{Q}$.  Both operations transform an intractable integral into a tractable one, but the mechanisms differ \textbf{(formal analogy)}:
+\begin{itemize}
+  \item Wick rotation is an \emph{analytic continuation} in the time variable.
+  \item Girsanov is a \emph{change of probability measure}---a reweighting of paths.
+\end{itemize}
+Risk-neutral pricing is not Wick rotation; it is a separate mathematical operation that produces analogous structures.
+
+%======================================================================
+\section{The Discrete Hamiltonian}
+\label{sec:discrete-hamiltonian}
+%======================================================================
+
+\subsection{Discretizing the Continuum}
+
+Moving from continuous space to a discrete lattice, the continuum Hamiltonian $\hat{H} = -(\hbar^2/2m)\partial_{xx}$ becomes a tridiagonal matrix.  The QuantLib Huatai fork implements three spatial discretization schemes for the log-space BS operator.
+
+\subsection{StandardCentral---The Naive Lattice}
+
+Centered finite differences on a mesh $\{x_0, \ldots, x_M\}$ with spacing~$h$ give:
+\begin{equation}\label{eq:centered-fd}
+  \partial_{xx}U \approx \frac{U_{i+1} - 2U_i + U_{i-1}}{h^2},
+  \quad
+  \partial_x U \approx \frac{U_{i+1} - U_{i-1}}{2h}.
+\end{equation}
+The tridiagonal ``Hamiltonian matrix'' has entries
+\begin{equation}\label{eq:standard-central}
+  a_{i,i-1} = \frac{\sigma^2}{2h^2} - \frac{\mu}{2h},\;
+  a_{i,i}   = -\frac{\sigma^2}{h^2} - r,\;
+  a_{i,i+1} = \frac{\sigma^2}{2h^2} + \frac{\mu}{2h}.
+\end{equation}
+In the lattice physics analogy \textbf{(formal)}, this is the \emph{tight-binding Hamiltonian} with hopping amplitudes $\sigma^2/(2h^2) \pm \mu/(2h)$.
+
+This is the scheme assembled in the \texttt{StandardCentral} branch of \texttt{FdmBlackScholesOp::setTime()} (\texttt{fdmblackscholesop.cpp:107--152}).
+
+The off-diagonal $a_{i,i-1}$ becomes negative when $|\mu|h > \sigma^2$, i.e., when the mesh \emph{P\'{e}clet number}
+\begin{equation}\label{eq:peclet}
+  \mathrm{Pe} = \frac{\mu h}{\sigma^2}
+\end{equation}
+exceeds~1 in absolute value.  This is the \emph{lattice artifact}: the grid is too coarse to resolve the convection scale.
+
+\subsection{ExponentialFitting---The Scharfetter-Gummel Flux}
+
+In semiconductor physics, Scharfetter and Gummel~(1969) discretized the drift-diffusion equation $J = -D\,dn/dx + v \cdot n$ using the exact steady-state solution on each cell, yielding an effective diffusion coefficient \textbf{(exact equivalence)}:
+\begin{equation}\label{eq:sg-deff}
+  D_{\text{eff}} = D \cdot \mathrm{Pe} \cdot \coth(\mathrm{Pe}),
+  \quad \mathrm{Pe} = \frac{vh}{2D}.
+\end{equation}
+This is the \emph{same algebraic construction} as the exponential fitting in QuantLib---equivalent up to the P\'{e}clet convention ($D = \sigma^2/2$, $v = \mu$).  For the BS operator:
+\begin{equation}\label{eq:ef-aeff}
+  a_{\text{eff}} = \frac{\sigma^2}{2} \cdot \rho(\mathrm{Pe}),
+  \quad \rho(\mathrm{Pe}) = \mathrm{Pe} \cdot \coth(\mathrm{Pe}),
+  \quad \mathrm{Pe} = \frac{\mu h}{\sigma^2}.
+\end{equation}
+The connection is an \textbf{exact algebraic equivalence for 1D cellwise convection-diffusion}; the reaction term $-rU$ is handled separately.
+
+In the code (\texttt{fdmblackscholesop.cpp:51--57}), the fitting factor is computed via \texttt{detail::xCothx(Pe, peSmall, peLarge)} (\texttt{fdmhyperboliccot.hpp:25--39}), which evaluates $\rho(\mathrm{Pe})$ with three-regime numerical stability:
+\begin{itemize}
+  \item $|\mathrm{Pe}| < \texttt{peSmall}$: Taylor series $1 + \mathrm{Pe}^2/3$ (avoids $0/0$).
+  \item $\texttt{peSmall} \le |\mathrm{Pe}| \le \texttt{peLarge}$: direct $x/\tanh(x)$.
+  \item $|\mathrm{Pe}| > \texttt{peLarge}$: asymptotic $|\mathrm{Pe}|$ (avoids overflow).
+\end{itemize}
+The thresholds $\texttt{peSmall} = 10^{-6}$ and $\texttt{peLarge} = 50$ are configurable in \texttt{FdmBlackScholesSpatialDesc}.
+
+The key property is $x\coth(x) \ge |x|$ for all~$x$, guaranteeing
+\begin{equation}\label{eq:ef-offdiag}
+  \frac{a_{\text{eff}}}{h^2} \pm \frac{\mu}{2h}
+  = \frac{\sigma^2}{2h^2}\bigl(\rho(\mathrm{Pe}) \pm \mathrm{Pe}\bigr) \ge 0
+\end{equation}
+\emph{unconditionally}---the M-matrix property holds for all parameter values.
+
+\subsection{MilevTaglianiCNEffectiveDiffusion---Artificial Viscosity}
+
+The third scheme is rooted in \emph{artificial viscosity} \textbf{(formal analogy)}.  In the original $S$-space formulation~\cite{MilevTagliani2010a}, the reaction term is discretized with a 6-point stencil ($\omega_1 = \omega_2 = -r/(16\sigma^2)$), introducing artificial diffusion $(1/8)(r\Delta S/\sigma)^2 V_{SS}$.  The log-space adaptation gives:
+\begin{equation}\label{eq:mt-aeff}
+  a_{\text{eff}} = \frac{\sigma^2}{2} + \frac{r^2 h^2}{8\sigma^2}
+\end{equation}
+subject to a safety cap $a_{\text{add}} = \min\!\bigl(r^2 h^2/(8\sigma^2),\; R_{\max} \cdot \sigma^2/2\bigr)$.
+
+\paragraph{Paper vs.\ Code---The Dual Track.}
+The full $S$-to-log translation yields both a diffusion addition and a drift correction $-r^2 h^2/(8\sigma^2)$ on the first-derivative term.  The shipped implementation \emph{deliberately omits the drift correction}: the operator uses the unmodified drift~$\mu$, not $\mu - a_{\text{add}}$.  The code comment notes that the drift correction is bounded by $O(h^2)$ grid error.  The shipped operator thus solves a slightly different PDE than the paper's full scheme; in low-volatility/high-rate regimes, $a_{\text{add}}$ can be comparable to~$\mu$ in absolute terms, though it remains $O(h^2)$ relative to the grid error.  The scheme should be understood as \emph{inspired by} rather than identical to the Milev-Tagliani nonstandard scheme.
+
+\paragraph{Paper result ($S$-space, Theorem~3.2~\cite{MilevTagliani2010a}).}
+Under $\sigma^2 > r$ and $\Delta t < 1/(rM)$, both $P^{-1} > 0$ and $N \ge 0$, guaranteeing positivity.
+
+\paragraph{Code reality (log-space).}
+The M-matrix condition depends on $|\mathrm{Pe}| = |\mu|h/\sigma^2 \le 1$.  The time-step constraint $\Delta t < 1/(rM)$ is noted but \emph{not enforced at runtime} (\texttt{fdmblackscholessolver.cpp:55--58}).
+
+\paragraph{CN-equivalence gate.}
+The solver (\texttt{fdmblackscholessolver.cpp:59--76}) enforces that the MT scheme uses CN-equivalent time stepping (CrankNicolson, Douglas, or CraigSneyd with $\theta = 0.5$) and $\texttt{dampingSteps} = 0$.  Otherwise, it falls back to ExponentialFitting.
+
+\subsection{The M-Matrix Property---Positivity Preservation}
+
+In quantum mechanics, $\rho = |\psi|^2 \ge 0$ everywhere.  In finance, $V \ge 0$.  The discrete analog is the \emph{M-matrix property}: if $P$ has positive diagonal, non-positive off-diagonals, and $P^{-1} \ge 0$, a non-negative input yields a non-negative output \textbf{(exact for the discrete system)}.
+
+The M-matrix property is \emph{not} unitarity---it is \emph{positivity preservation} \textbf{(formal analogy)}.  Unitarity conserves the norm; the M-matrix conserves the sign.
+
+The runtime diagnostic (\texttt{fdmmatrixdiagnostic.hpp}) performs a \emph{partial} M-matrix check: scanning off-diagonal signs, a necessary but not sufficient condition.  The \texttt{FallbackToExponentialFitting} policy (\texttt{fdmblackscholesop.cpp:247--254}) is a \emph{runtime adaptive stabilization mechanism} \textbf{(heuristic)}, not a phase transition.
+
+%======================================================================
+\section{The Cayley Propagator}
+\label{sec:cayley-propagator}
+%======================================================================
+
+\subsection{From Differential Equation to Discrete Propagator}
+
+In quantum mechanics, the time evolution operator for a time-independent Hamiltonian is $U(t) = e^{-iHt/\hbar}$.  The \emph{Cayley form} provides a rational approximation:
+\begin{equation}\label{eq:cayley-qm}
+  U_{\text{Cayley}}
+  = \biggl(I + \frac{i\Delta t\,H}{2\hbar}\biggr)^{\!-1}
+    \biggl(I - \frac{i\Delta t\,H}{2\hbar}\biggr).
+\end{equation}
+When $H$ is self-adjoint, $U_{\text{Cayley}}$ is \emph{exactly unitary}.
+
+\subsection{Crank-Nicolson as the Financial Cayley Propagator}
+
+The CN scheme for $V_\tau = AV$ produces
+\begin{equation}\label{eq:cn-system}
+  P\,\mathbf{V}^{n+1} = N\,\mathbf{V}^n,
+  \quad P = \frac{1}{\Delta t}I - \frac{1}{2}A,
+  \quad N = \frac{1}{\Delta t}I + \frac{1}{2}A.
+\end{equation}
+The propagator $G_{\text{CN}} = P^{-1}N = (I - \tfrac{\Delta t}{2}A)^{-1}(I + \tfrac{\Delta t}{2}A)$ is \textbf{exactly the Cayley transform} of $(\Delta t/2)A$ \textbf{(exact algebraic identity)}.
+
+In QuantLib (\texttt{cranknicolsonscheme.cpp:37--45}), CN is decomposed into an explicit half-step and an implicit half-step with $\theta = 0.5$.
+
+\subsection{Contractivity, Not Unitarity}
+
+The analogy must be stated carefully \textbf{(formal analogy only)}.  In QM, the generator $A_{\text{QM}} = -(i/\hbar)H$ is \emph{skew-adjoint}, making the Cayley transform unitary.  The BS spatial operator~$A$ is \emph{not} skew-adjoint: it has a symmetric diffusion part, an antisymmetric convection part, and scalar dissipation.  Consequently,
+\begin{equation*}
+  |\lambda_i(G_{\text{CN}})| \le 1 \quad \forall\, i
+\end{equation*}
+with strict contraction when $r > 0$.  The spectral radius satisfies
+\begin{equation}\label{eq:spectral-map}
+  |\lambda| = \left|\frac{1 + z\lambda_A}{1 - z\lambda_A}\right|,
+  \quad z = \frac{\Delta t}{2},
+\end{equation}
+where $\lambda_A = a + ib$ is an eigenvalue of~$A$.  When $a \le 0$, $|\lambda| \le 1$.
+
+\subsection{Eigenvalue Pathology---Parasitic Checkerboard Modes}
+
+Writing $P = (1/\Delta t)I + C$ and $N = (1/\Delta t)I - C$ with $C = -A/2$, the eigenvalues of $P^{-1}N$ are
+\begin{equation}\label{eq:eigenvalue-map}
+  \lambda_i(P^{-1}N) = \frac{1 - \Delta t\,\lambda_i(C)}{1 + \Delta t\,\lambda_i(C)}.
+\end{equation}
+Under the conditions of Theorem~3.1~\cite{MilevTagliani2010a} ($|\mathrm{Pe}| < 1$, appropriate $\Delta t$ bounds), these lie in $(0,1)$.  When $|\mathrm{Pe}| > 1$, the matrix~$N$ develops negative entries and
+\begin{equation*}
+  \lambda_i(P^{-1}N) \to -1,
+\end{equation*}
+producing \emph{parasitic high-frequency checkerboard modes}.  These remain inside the unit disk but decay so slowly that they contaminate the solution for many time steps.
+
+This pathology occurs in the \emph{low-volatility/convection-dominated regime} ($|\mu|h > \sigma^2$) and affects:
+\begin{itemize}
+  \item StandardCentral + CN: always when $|\mathrm{Pe}| > 1$.
+  \item MT + CN: prevented under paper conditions ($\sigma^2 > r$, $\Delta t < 1/(rM)$).
+  \item ExponentialFitting + CN: never (unconditional M-matrix).
+\end{itemize}
+
+The CN-equivalence gate (\texttt{fdmblackscholessolver.cpp:33--45}) detects incompatible time-space combinations and falls back to ExponentialFitting.
+
+%======================================================================
+\section{Barriers as Quantum Measurements}
+\label{sec:barriers}
+%======================================================================
+
+\subsection{The Knock-Out Event}
+
+A discretely monitored double barrier knock-out option is terminated at monitoring date~$t_i$ if the price leaves $[L, U]$.  In the PDE framework:
+\begin{equation}\label{eq:barrier-reset}
+  V(S, t_i) = V(S, t_i^-) \cdot \mathbf{1}_{[\ln L, \ln U]}(x)
+             + \text{rebate} \cdot \mathbf{1}_{\mathbb{R}\setminus[\ln L,\ln U]}(x).
+\end{equation}
+
+\subsection{The Code Mechanism}
+
+In \texttt{fdmdiscretebarrierstepcondition.cpp:62--96}, at each monitoring time:
+\begin{quote}
+\small\texttt{for (Size idx : knockOutIndices\_)}\\
+\texttt{\quad a[idx] = rebate\_;}
+\end{quote}
+The \texttt{knockOutIndices\_} (precomputed in the constructor) mark every mesh node with $x < \ln L$ or $x > \ln U$.  The time matching uses a tolerant comparison with relative tolerance $10^{-10}$.
+
+\subsection{Absorption and Killing}
+
+The classical interpretation is \emph{absorption}: the particle reaches the boundary and is removed, replaced with the rebate.  In stochastic-process language, this is a \emph{killed diffusion}.
+
+\subsection{Projective Measurement---The Quantum Interpretation}
+
+In quantum mechanics, a \emph{projective measurement} collapses the wave function.  The \emph{von Neumann projection postulate} \textbf{(formal analogy)} says
+\begin{equation}\label{eq:projection}
+  |\psi\rangle \to \frac{P_{[L,U]}\,|\psi\rangle}{\|P_{[L,U]}\,|\psi\rangle\|}.
+\end{equation}
+The discrete barrier performs this operation (without normalization): the solution is projected at each monitoring date, and evolution continues from the projected state.
+
+This is \emph{repeated quantum measurement}: at each date, the price is ``observed.''  As monitoring frequency increases, the \emph{quantum Zeno effect} emerges---the barrier becomes continuous.
+
+\paragraph{Caveat (\textbf{formal analogy only}).}
+The financial ``measurement'' is classical: there is no superposition, no interference, no Born rule.  The analogy captures the mathematical structure (sharp state reset) but not the physical content (wave-function collapse, entanglement).
+
+\subsection{Why Not Tunneling?}
+
+Quantum tunneling---a particle penetrating a potential barrier---is the \emph{wrong} analogy.  The barrier option is \emph{destroyed} at the barrier, not transmitted through it.  The correct physics analog is absorption/killing or projective measurement.
+
+%======================================================================
+\section{Where the Analogy Breaks}
+\label{sec:breaks}
+%======================================================================
+
+\subsection{Three Layers of Correspondence}
+
+The correspondence operates at three levels:
+\begin{enumerate}
+  \item \textbf{Exact identities}: mathematical equivalences without qualification.
+  \item \textbf{Formal analogies}: same algebraic form, different physical content.
+  \item \textbf{Heuristic connections}: suggestive parallels that illuminate but do not prove.
+\end{enumerate}
+
+\subsection{Five Breakdowns}
+
+\paragraph{Break~1: Risk-neutral measure $\neq$ Wick rotation.}
+Girsanov changes the drift via a Radon-Nikodym derivative; Wick rotation is an analytic continuation in the complex time plane.  Different operations, similar structural outcomes.  \textbf{Formal analogy at best.}
+
+\paragraph{Break~2: The BS operator is not self-adjoint.}
+$\hat{H}_{\text{BS}} = -(\sigma^2/2)\partial_{xx} - \mu\partial_x + r$ is not Hermitian in $L^2$; the drift term is antisymmetric.  The evolution is dissipative, not conservative.  \textbf{Formal analogy only.}
+
+\paragraph{Break~3: CN is contractive, not unitary.}
+$\|P^{-1}N\| \le 1$ (contraction), not $= 1$ (unitarity).  No conserved ``probability''; the Cayley form preserves contraction, not norm.  \textbf{Formal analogy.}
+
+\paragraph{Break~4: Barriers are absorption, not tunneling.}
+The option is destroyed, not transmitted.  The correct analog is projective measurement/absorption, not potential scattering.  \textbf{Formal analogy for projection; tunneling is incorrect.}
+
+\paragraph{Break~5: No interference, no superposition.}
+In finance, $V$ is real and non-negative; path contributions add as positive reals.  There is no destructive interference, no double-slit experiment.  The Euclidean path integral suppresses oscillation: $e^{-S_E}$ is positive, unlike $e^{iS}$.  \textbf{This is where the analogy breaks most completely.}
+
+\subsection{Analogy Report Card}
+
+Table~\ref{tab:report-card} summarizes the strength of each claimed correspondence.
+
+\begin{table*}[!t]
+\centering
+\caption{Analogy Strength Summary}
+\label{tab:report-card}
+\begin{tabular}{lll}
+\toprule
+\textbf{Claim} & \textbf{Strength} & \textbf{Basis} \\
+\midrule
+Gauge-transformed BS $=$ heat equation & Exact identity & Change of variables + similarity transform \\
+Heat eq.\ $=$ imaginary-time Schr\"{o}dinger & Exact identity & Same PDE under coefficient matching \\
+$\sigma^2/2 \leftrightarrow \hbar/(2m)$, $m_{\text{eff}} = 1/\sigma^2$ & Exact & Coefficient identification \\
+Feynman-Kac theorem & Exact theorem & It\^{o} calculus proof \\
+Path integral via Wiener measure & Exact & Rigorous measure-theoretic construction \\
+$\int\mathcal{D}x\,e^{-S_E}$ notation & Formal shorthand & Physicist's notation \\
+Risk-neutral $\leftrightarrow$ Wick rotation & Formal analogy & Different operations \\
+BS operator as Hamiltonian & Formal analogy & Operator not self-adjoint \\
+CN $=$ Cayley transform & Exact algebra & Same rational map \\
+CN $\leftrightarrow$ unitary propagator & Formal analogy & Contraction vs.\ unitarity \\
+EF $\leftrightarrow$ Scharfetter-Gummel & Exact equivalence & 1D cellwise (up to Pe convention) \\
+MT $\leftrightarrow$ numerical viscosity & Formal analogy & Same principle \\
+M-matrix $\leftrightarrow$ positivity & Exact (discrete) & M-matrix $\Rightarrow$ non-negative solution \\
+M-matrix $\leftrightarrow$ unitarity & Incorrect & Sign vs.\ norm \\
+Barrier $\leftrightarrow$ projection & Formal analogy & No quantum phase \\
+Barrier $\leftrightarrow$ tunneling & Incorrect & Barriers kill \\
+Fallback $\leftrightarrow$ phase transition & Heuristic & Adaptive stabilization \\
+$x\coth(x)$ in BS $\leftrightarrow$ Bose-Einstein & Formal analogy & Same function, different context \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Finance-PDE-Physics Dictionary}
+
+Table~\ref{tab:dictionary} provides a trilingual dictionary.
+
+\begin{table*}[!t]
+\centering
+\caption{Finance-PDE-Physics Dictionary (22 entries)}
+\label{tab:dictionary}
+\begin{tabular}{clllc}
+\toprule
+\textbf{\#} & \textbf{Finance Term} & \textbf{PDE Term} & \textbf{Physics Term} & \textbf{Strength} \\
+\midrule
+1  & Option price $V(S,t)$          & Solution $U(x,\tau)$       & Wave function $\Psi(x,\tau)$             & Exact \\
+2  & Underlying price $S$           & Physical coordinate        & Position                                 & Exact \\
+3  & Log-price $x = \ln S$          & Log-coordinate             & Position (natural units)                  & Exact \\
+4  & Time to maturity $\tau=T{-}t$  & Forward time               & Imaginary time                            & Exact \\
+5  & Volatility $\sigma$            & $\sqrt{2D}$                & $\sqrt{\hbar/m_{\text{eff}}}$             & Exact \\
+6  & Effective mass $1/\sigma^2$    & Inverse diffusion          & Particle mass $m_{\text{eff}}$            & Exact \\
+7  & Risk-free rate $r$             & Reaction coefficient       & Constant potential $V_0$                  & Formal \\
+8  & Risk-neutral drift $\mu$       & Convection velocity        & Advection bias                            & Formal \\
+9  & Discount $e^{-r\tau}$          & Amplitude decay            & Ground-state decay                        & Formal \\
+10 & Terminal payoff $f(S_T)$       & Initial condition          & Initial wave packet                       & Exact \\
+11 & BS PDE operator                & Spatial operator $A$       & Hamiltonian $\hat{H}$                     & Formal \\
+12 & CN time step                   & Cayley transform           & Cayley propagator                         & Exact \\
+13 & EF fitting factor $\rho$       & Modified diffusion         & Scharfetter-Gummel flux                   & Exact \\
+14 & MT added diffusion             & Artificial viscosity       & Numerical viscosity                       & Formal \\
+15 & M-matrix property              & Non-negative inverse       & Positivity preservation                   & Exact \\
+16 & Barrier knock-out              & Dirichlet reset            & Absorbing boundary / projection           & Formal \\
+17 & Monitoring date                & Reset time                 & Measurement time                          & Formal \\
+18 & Rebate                         & Boundary value             & Post-measurement state                    & Formal \\
+19 & Risk-neutral expectation       & PDE solution               & Path integral                             & Exact \\
+20 & Girsanov change of measure     & Drift transformation       & (Not Wick rotation)                       & Formal \\
+21 & Mesh P\'{e}clet number         & Convection/diffusion ratio & Transport regime parameter                & Exact \\
+22 & Grid convergence               & Mesh refinement            & Continuum limit                           & Exact \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Code Traceability}
+
+Table~\ref{tab:traceability} maps each component to source files, paper references, and physics analogs.
+
+\begin{table*}[!t]
+\centering
+\caption{Code Traceability}
+\label{tab:traceability}
+\footnotesize
+\begin{tabular}{>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash\ttfamily\scriptsize}p{4.4cm}>{\raggedright\arraybackslash}p{3.2cm}>{\raggedright\arraybackslash}p{3.2cm}}
+\toprule
+\textbf{Component} & \textbf{Source File} & \textbf{Paper Ref.} & \textbf{Physics Analog} \\
+\midrule
+\rmfamily BS operator assembly        & fdmblackscholesop.cpp:103--265        & ---                                  & \rmfamily Hamiltonian construction \\
+\rmfamily StandardCentral             & fdmblackscholesop.cpp:107--152        & ---                                  & \rmfamily Tight-binding lattice \\
+\rmfamily ExponentialFitting          & fdmblackscholesop.cpp:51--57          & \rmfamily Duffy~\cite{Duffy2004}, \S3          & \rmfamily Scharfetter-Gummel flux \\
+\rmfamily MT eff.\ diffusion          & fdmblackscholesop.cpp:58--66          & \rmfamily\cite{MilevTagliani2010a}, Eq.~8--10 & \rmfamily Artificial viscosity \\
+\rmfamily Drift correction omission   & fdmblackscholesop.cpp:59--62          & \rmfamily\cite{MilevTagliani2010a}, 6-pt      & \rmfamily Deliberate simplification \\
+\rmfamily $x\coth(x)$ evaluation      & fdmhyperboliccot.hpp:25--39           & \rmfamily\cite{Duffy2004}, fitting formula    & \rmfamily Three-regime transport \\
+\rmfamily Scheme descriptor           & fdmblackscholesspatialdesc.hpp:12--67  & ---                                  & \rmfamily Lattice config \\
+\rmfamily M-matrix diagnostic         & fdmmatrixdiagnostic.hpp:52--101        & \rmfamily\cite{MilevTagliani2010a}, Thm.~3.1  & \rmfamily Positivity check \\
+\rmfamily Fallback to EF              & fdmblackscholesop.cpp:247--254        & ---                                  & \rmfamily Adaptive stabilization \\
+\rmfamily CN propagator               & cranknicolsonscheme.cpp:37--45         & \rmfamily\cite{MilevTagliani2010a,Duffy2004}  & \rmfamily Cayley propagator \\
+\rmfamily CN-equiv.\ gate             & fdmblackscholessolver.cpp:33--76       & \rmfamily\cite{MilevTagliani2010a}, Thm.~3.2  & \rmfamily Compat.\ check \\
+\rmfamily $\Delta t{<}1/(rM)$ unenforced & fdmblackscholessolver.cpp:55--58  & \rmfamily\cite{MilevTagliani2010a}, Thm.~3.2  & \rmfamily Time-step (paper) \\
+\rmfamily Barrier step cond.          & fdmdiscretebarrierstepcondition.cpp:62--96 & \rmfamily\cite{MilevTagliani2010a}, Eq.~5 & \rmfamily Projection / absorption \\
+\rmfamily Barrier indices             & fdmdiscretebarrierstepcondition.cpp:55--59 & ---                              & \rmfamily Measurement support \\
+\rmfamily Tolerant time matching      & fdmdiscretebarrierstepcondition.cpp:71--87 & ---                              & \rmfamily Robust monitoring \\
+\rmfamily Solver assembly             & fdmblackscholessolver.cpp:47--89           & ---                              & \rmfamily Full system assembly \\
+\rmfamily Spatial scheme tests        & fdmblackscholes\-spatialdiscretization.cpp & \rmfamily All three papers          & \rmfamily Lattice validation \\
+\rmfamily Barrier tests               & fdmdiscretebarrier.cpp                     & \rmfamily\cite{MilevTagliani2010a}, \S4 & \rmfamily Measurement validation \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Paper References}
+
+Three papers underpin this work:
+\begin{enumerate}
+  \item \textbf{Milev \& Tagliani}~\cite{MilevTagliani2010a}: ``Nonstandard Finite Difference Schemes with Application to Finance,'' \emph{Serdica Math.\ J.}\ 36:75--88, 2010.  Theorems~3.1--3.2; Section~4 examples ($K{=}100$, $L{=}90$, $U{=}110$).
+  \item \textbf{Milev \& Tagliani}~\cite{MilevTagliani2010b}: ``Low Volatility Options and Numerical Diffusion,'' \emph{Serdica Math.\ J.}\ 36:223--236, 2010.  Fitting factor formula; artificial diffusion comparison.
+  \item \textbf{Duffy}~\cite{Duffy2004}: ``A Critique of the Crank-Nicolson Scheme,'' \emph{Wilmott Mag.}, July~2004.  Exponentially fitted schemes; Scharfetter-Gummel connection.
+\end{enumerate}
+
+%======================================================================
+\section{Epilogue: The Defensibility Test}
+\label{sec:epilogue}
+%======================================================================
+
+This essay has pushed the quantum analogy aggressively.  But every claim is annotated, and Section~\ref{sec:breaks} catalogs the limits.
+
+The test of a good analogy is whether it \emph{survives removal of the metaphor}.  Strip away the quantum language:
+\begin{itemize}
+  \item An exact change of variables reducing BS to the heat equation.
+  \item An exact coefficient matching with imaginary-time Schr\"{o}dinger.
+  \item An exact theorem (Feynman-Kac) connecting PDE solutions to path integrals.
+  \item A rigorous algebraic identity between CN and the Cayley transform.
+  \item An exact equivalence between exponential fitting and semiconductor flux discretization.
+  \item A precise analysis of when discrete positivity holds and when it fails.
+\end{itemize}
+
+The Black-Scholes equation is not ``like'' an imaginary-time Schr\"{o}dinger equation.  After the gauge transformation, it \emph{is} one.  The rest is a matter of how far the analogy extends into the discrete world---and the answer, as we have seen, is remarkably far, but not without limit.
+
+%======================================================================
+% Bibliography
+%======================================================================
+\begin{thebibliography}{9}
+\bibitem{MilevTagliani2010a}
+M.~Milev and A.~Tagliani, ``Nonstandard finite difference schemes with application to finance: Option pricing,'' \emph{Serdica Math.\ J.}, vol.~36, pp.~75--88, 2010.
+
+\bibitem{MilevTagliani2010b}
+M.~Milev and A.~Tagliani, ``Low volatility options and numerical diffusion of finite difference schemes,'' \emph{Serdica Math.\ J.}, vol.~36, pp.~223--236, 2010.
+
+\bibitem{Duffy2004}
+D.~J.~Duffy, ``A critique of the Crank--Nicolson scheme: Strengths and weaknesses for financial instrument pricing,'' \emph{Wilmott Magazine}, Jul.~2004.
+\end{thebibliography}

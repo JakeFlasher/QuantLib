@@ -2,11 +2,23 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 /*
- Tests that non-standard spatial discretisations (exponential fitting,
- Milev-Tagliani CN-variant) restore positivity and eliminate spurious
- oscillations for discontinuous payoffs under extreme low-volatility
- conditions.  Also validates the Scheme-2 time-scheme gating in the
- solver layer.
+ Positivity preservation and oscillation suppression tests.
+
+ Validates that non-standard spatial discretizations (ExponentialFitting,
+ MilevTaglianiCNEffectiveDiffusion) restore positivity and eliminate
+ spurious oscillations for discontinuous payoffs under extreme
+ low-volatility / high-drift conditions.
+
+ Key theorem-validation tests:
+   - testOscillationElimination: CN oscillations at low vol vanish
+     under ExponentialFitting and MT schemes — cf. [Duffy04, §3]
+   - testMMatrixFallbackWithDiagnostics: verifies M-matrix violation
+     detection and fallback to ExponentialFitting — cf. [MT10, Thm 3.1]
+   - testScheme2GatingFallback: solver gating correctly downgrades
+     MT to ExponentialFitting when CN-equivalence fails —
+     cf. [MT10, Thm 3.2]
+   - testPositivityPreservation: non-negative solution under extreme
+     parameters where standard central FD goes negative
 */
 
 #include "toplevelfixture.hpp"
@@ -25,8 +37,11 @@
 #include <ql/methods/finitedifferences/utilities/fdmdirichletboundary.hpp>
 #include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
 #include <ql/math/matrixutilities/sparsematrix.hpp>
+#include <ql/instruments/barrieroption.hpp>
+#include <ql/pricingengines/barrier/fdblackscholesbarrierengine.hpp>
 #include <ql/processes/blackscholesprocess.hpp>
 #include <ql/quotes/simplequote.hpp>
+#include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
 #include <ql/time/daycounters/actual365fixed.hpp>
 
 #include <boost/test/unit_test.hpp>
@@ -555,6 +570,29 @@ BOOST_AUTO_TEST_CASE(testTruncatedCallNumericalDiffusion) {
     const Size skip = 5;
     const Real monoTol = 1e-10;
 
+    // Measure transition width near U: count grid nodes where the
+    // value drops from >0.5*peak to <0.01*peak within a window.
+    auto transitionWidth = [&](const Array& v) -> Size {
+        const Real xU = std::log(U);
+        Real peak = *std::max_element(v.begin(), v.end());
+        Size iStart = 0, iEnd = 0;
+        bool foundStart = false;
+        for (const auto& iter : *mesher->layout()) {
+            const Real x = mesher->location(iter, 0);
+            if (x > xU - 0.5 && x < xU + 0.5) {
+                if (!foundStart && v[iter.index()] > 0.5 * peak) {
+                    iStart = iter.index();
+                    foundStart = true;
+                }
+                if (foundStart && v[iter.index()] < 0.01 * peak) {
+                    iEnd = iter.index();
+                    break;
+                }
+            }
+        }
+        return (iEnd > iStart) ? iEnd - iStart : 0;
+    };
+
     // ---- StandardCentral + CN: expect oscillations ----
     Size violCentral = 0;
     {
@@ -607,30 +645,7 @@ BOOST_AUTO_TEST_CASE(testTruncatedCallNumericalDiffusion) {
         BOOST_TEST_MESSAGE("  ExpFit+CN: neg=" << negCount
             << ", monoViol=" << violFitted);
 
-        // Measure transition width near U=70:
-        // count nodes where value drops from >0.5*peak to <0.01*peak
-        const Real xU = std::log(U);
-        Real peak = 0.0;
-        for (Size i = 0; i < v.size(); ++i)
-            peak = std::max(peak, v[i]);
-
-        Size iStart = 0, iEnd = 0;
-        bool foundStart = false;
-        for (const auto& iter : *mesher->layout()) {
-            const Real x = mesher->location(iter, 0);
-            if (x > xU - 0.5 && x < xU + 0.5) {
-                if (!foundStart && v[iter.index()] > 0.5 * peak) {
-                    iStart = iter.index();
-                    foundStart = true;
-                }
-                if (foundStart && v[iter.index()] < 0.01 * peak) {
-                    iEnd = iter.index();
-                    break;
-                }
-            }
-        }
-        transWidthExpFit = (iEnd > iStart) ? iEnd - iStart : 0;
-
+        transWidthExpFit = transitionWidth(v);
         BOOST_TEST_MESSAGE("  ExpFit+CN: transition_width="
             << transWidthExpFit << " nodes");
     }
@@ -658,29 +673,7 @@ BOOST_AUTO_TEST_CASE(testTruncatedCallNumericalDiffusion) {
         BOOST_TEST_MESSAGE("  MT+CN: neg=" << negCount
             << ", monoViol=" << violMT);
 
-        // Measure transition width
-        const Real xU = std::log(U);
-        Real peak = 0.0;
-        for (Size i = 0; i < v.size(); ++i)
-            peak = std::max(peak, v[i]);
-
-        Size iStart = 0, iEnd = 0;
-        bool foundStart = false;
-        for (const auto& iter : *mesher->layout()) {
-            const Real x = mesher->location(iter, 0);
-            if (x > xU - 0.5 && x < xU + 0.5) {
-                if (!foundStart && v[iter.index()] > 0.5 * peak) {
-                    iStart = iter.index();
-                    foundStart = true;
-                }
-                if (foundStart && v[iter.index()] < 0.01 * peak) {
-                    iEnd = iter.index();
-                    break;
-                }
-            }
-        }
-        transWidthMT = (iEnd > iStart) ? iEnd - iStart : 0;
-
+        transWidthMT = transitionWidth(v);
         BOOST_TEST_MESSAGE("  MT+CN: transition_width="
             << transWidthMT << " nodes");
     }
@@ -891,12 +884,14 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
 
     const Time dt = maturity / tGrid;
 
-    // Step 1: DiagnosticsOnly on the coarse mesh — verify violation
+    // Step 1: None policy on the coarse mesh — verify that MT
+    // produces negative off-diagonals (M-matrix violation) when
+    // no corrective action is taken.
     {
         FdmBlackScholesSpatialDesc desc =
             FdmBlackScholesSpatialDesc::milevTaglianiCN();
         desc.mMatrixPolicy =
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::DiagnosticsOnly;
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
 
         auto op = ext::make_shared<FdmBlackScholesOp>(
             mesher, process, K,
@@ -910,9 +905,9 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
         Size negCount = countNegativeOffDiag(mat, n, 0.0);
         BOOST_CHECK_MESSAGE(negCount > 0,
             "Expected MT M-matrix violations with negative q on "
-            "coarse grid under DiagnosticsOnly, found " << negCount);
+            "coarse grid with no corrective policy, found " << negCount);
 
-        BOOST_TEST_MESSAGE("  MT+DiagnosticsOnly (coarse): "
+        BOOST_TEST_MESSAGE("  MT+None (coarse): "
             << negCount << " negative off-diag entries");
     }
 
@@ -1126,6 +1121,569 @@ BOOST_AUTO_TEST_CASE(testMilevTaglianiTruncatedCallSmoothing) {
         "MT L_inf error vs reference too large: " << maxErrMT);
 }
 
+
+BOOST_AUTO_TEST_CASE(testThetaAtFirstAccessor) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing thetaAt() works as first accessor on "
+        "FdmBlackScholesSolver (LazyObject initialization)...");
+
+    LowVolSetup setup;
+
+    const Real K = 60.0;
+    const Real cash = 10.0;
+    const Size xGrid = 100;
+    const Size tGrid = 20;
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(
+            std::log(10.0), std::log(200.0), xGrid));
+
+    const ext::shared_ptr<StrikedTypePayoff> payoff =
+        ext::make_shared<CashOrNothingPayoff>(Option::Put, K, cash);
+    const auto calculator =
+        ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+
+    const auto conditions =
+        ext::make_shared<FdmStepConditionComposite>(
+            std::list<std::vector<Time> >(),
+            FdmStepConditionComposite::Conditions());
+
+    const FdmBoundaryConditionSet bcSet;
+
+    const FdmSolverDesc solverDesc = {
+        mesher, bcSet, conditions, calculator,
+        setup.maturity, tGrid, 0
+    };
+
+    // Use a mutable vol quote so we can trigger solver recalculation.
+    // Changing vol directly affects the PDE coefficients (drift and
+    // diffusion), ensuring the theta value actually changes.
+    auto volQuote = ext::make_shared<SimpleQuote>(setup.vol);
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(setup.spot)),
+        Handle<YieldTermStructure>(flatRate(setup.today, setup.q, setup.dc)),
+        Handle<YieldTermStructure>(flatRate(setup.today, setup.r, setup.dc)),
+        Handle<BlackVolTermStructure>(
+            ext::make_shared<BlackConstantVol>(
+                setup.today, Calendar(), Handle<Quote>(volQuote),
+                setup.dc)));
+
+    FdmBlackScholesSolver solver(
+        Handle<GeneralizedBlackScholesProcess>(process),
+        K, solverDesc,
+        FdmSchemeDesc::CrankNicolson(),
+        false, -Null<Real>(),
+        Handle<FdmQuantoHelper>(),
+        fittedDesc());
+
+    // thetaAt as FIRST accessor (no prior call to valueAt/deltaAt/gammaAt)
+    const Real theta1 = solver.thetaAt(setup.spot);
+    BOOST_CHECK_MESSAGE(std::isfinite(theta1),
+        "thetaAt() as first accessor returned non-finite value: " << theta1);
+
+    // After valueAt, thetaAt should return a consistent result at the
+    // same spot (same solver state, same interpolation point)
+    const Real value = solver.valueAt(setup.spot);
+    BOOST_CHECK(std::isfinite(value));
+    const Real theta2 = solver.thetaAt(setup.spot);
+    BOOST_CHECK_MESSAGE(std::isfinite(theta2),
+        "thetaAt() after valueAt() returned non-finite value: " << theta2);
+    BOOST_CHECK_MESSAGE(std::fabs(theta2 - theta1) < 1e-12,
+        "thetaAt() should be consistent before and after valueAt(): "
+        "theta1=" << theta1 << ", theta2=" << theta2);
+
+    // After changing the vol quote, thetaAt at the SAME spot should
+    // return a different value, proving LazyObject recalculation.
+    // Vol change directly affects PDE coefficients (drift, diffusion).
+    const Real thetaBeforeUpdate = solver.thetaAt(setup.spot);
+    volQuote->setValue(setup.vol * 10.0);
+    const Real thetaAfterUpdate = solver.thetaAt(setup.spot);
+    BOOST_CHECK_MESSAGE(std::isfinite(thetaAfterUpdate),
+        "thetaAt() after vol change returned non-finite value: "
+        << thetaAfterUpdate);
+    BOOST_CHECK_MESSAGE(
+        std::fabs(thetaAfterUpdate - thetaBeforeUpdate) > 1e-14,
+        "thetaAt() at the same s should differ after vol update "
+        "(proves recalculation): before=" << thetaBeforeUpdate
+        << ", after=" << thetaAfterUpdate);
+
+    // Negative test: s <= 0 should not produce a finite result.
+    // log(0) = -inf and log(negative) = NaN, so interpolation at
+    // those values should not return a usable finite number.
+    // Either an exception or a non-finite result is acceptable.
+    for (Real badS : {0.0, -1.0}) {
+        bool caught = false;
+        try {
+            const Real badTheta = solver.thetaAt(badS);
+            BOOST_CHECK_MESSAGE(!std::isfinite(badTheta),
+                "thetaAt(" << badS << ") should not produce a "
+                "finite result, got " << badTheta);
+        } catch (...) {
+            caught = true;
+        }
+        if (caught)
+            BOOST_TEST_MESSAGE("  thetaAt(" << badS
+                               << ") threw (acceptable)");
+    }
+}
+
+
+BOOST_AUTO_TEST_CASE(testCNGateCraigSneydAccepted) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing CN-equivalence gate accepts CraigSneyd(0.5) in 1D "
+        "and rejects schemes with damping steps...");
+
+    LowVolSetup setup;
+
+    const Real K = 60.0;
+    const Real cash = 10.0;
+    const Size xGrid = 200;
+    const Size tGrid = 50;
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(
+            std::log(10.0), std::log(200.0), xGrid));
+
+    const ext::shared_ptr<StrikedTypePayoff> payoff =
+        ext::make_shared<CashOrNothingPayoff>(Option::Put, K, cash);
+    const auto calculator =
+        ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+
+    const auto conditions =
+        ext::make_shared<FdmStepConditionComposite>(
+            std::list<std::vector<Time> >(),
+            FdmStepConditionComposite::Conditions());
+
+    const FdmBoundaryConditionSet bcSet;
+
+    const FdmSolverDesc solverDescNoDamping = {
+        mesher, bcSet, conditions, calculator,
+        setup.maturity, tGrid, 0
+    };
+
+    const FdmSolverDesc solverDescWithDamping = {
+        mesher, bcSet, conditions, calculator,
+        setup.maturity, tGrid, 3  // 3 damping steps
+    };
+
+    // CraigSneyd(0.5) + dampingSteps=0 + MT: should be accepted.
+    // Proof of acceptance: MT values must DIFFER from ExpFit values,
+    // since at low vol the MT and ExpFit spatial coefficients diverge.
+    // If the gate silently fell back, they would be bit-identical.
+    {
+        FdmBlackScholesSolver solverMT(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping,
+            FdmSchemeDesc::CraigSneyd(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            milevTaglianiDesc());
+
+        FdmBlackScholesSolver solverFitted(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping,
+            FdmSchemeDesc::CraigSneyd(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            fittedDesc());
+
+        const Real vMT = solverMT.valueAt(setup.spot);
+        const Real vFit = solverFitted.valueAt(setup.spot);
+
+        BOOST_CHECK(std::isfinite(vMT));
+        BOOST_CHECK(std::isfinite(vFit));
+
+        // Assert acceptance: MT and ExpFit produce different values
+        // because at sigma=0.001 the MT added diffusion is large
+        BOOST_CHECK_MESSAGE(std::fabs(vMT - vFit) > 0.01,
+            "CraigSneyd+MT should be accepted (not fallen back to "
+            "ExpFit). MT=" << vMT << ", ExpFit=" << vFit
+            << ", diff=" << std::fabs(vMT - vFit));
+
+        BOOST_TEST_MESSAGE("  CraigSneyd+MT: " << vMT
+            << ", CraigSneyd+ExpFit: " << vFit
+            << " (diff=" << std::fabs(vMT - vFit) << ")");
+    }
+
+    // CN + dampingSteps > 0 + FailFast: should throw
+    {
+        FdmBlackScholesSpatialDesc desc = milevTaglianiDesc();
+        desc.mMatrixPolicy =
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::FailFast;
+
+        BOOST_CHECK_THROW(
+            FdmBlackScholesSolver(
+                Handle<GeneralizedBlackScholesProcess>(setup.process),
+                K, solverDescWithDamping,
+                FdmSchemeDesc::CrankNicolson(),
+                false, -Null<Real>(),
+                Handle<FdmQuantoHelper>(),
+                desc).valueAt(setup.spot),
+            Error);
+    }
+
+    // CN + dampingSteps > 0 + FallbackToExponentialFitting: should
+    // silently fall back (match explicit ExpFit results)
+    {
+        FdmBlackScholesSolver solverMTFallback(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescWithDamping,
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            milevTaglianiDesc());
+
+        FdmBlackScholesSolver solverFittedExplicit(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescWithDamping,
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            fittedDesc());
+
+        const Real vFallback = solverMTFallback.valueAt(setup.spot);
+        const Real vExplicit = solverFittedExplicit.valueAt(setup.spot);
+
+        BOOST_CHECK(std::isfinite(vFallback));
+        BOOST_CHECK(std::isfinite(vExplicit));
+        BOOST_CHECK_SMALL(std::fabs(vFallback - vExplicit), 1e-10);
+    }
+
+    // Non-CN schemes + MT: should silently fall back to ExpFit
+    for (const auto& scheme :
+             {FdmSchemeDesc::ImplicitEuler(),
+              FdmSchemeDesc::Hundsdorfer()}) {
+        FdmBlackScholesSolver solverMT(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping, scheme,
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            milevTaglianiDesc());
+
+        FdmBlackScholesSolver solverFitted(
+            Handle<GeneralizedBlackScholesProcess>(setup.process),
+            K, solverDescNoDamping, scheme,
+            false, -Null<Real>(),
+            Handle<FdmQuantoHelper>(),
+            fittedDesc());
+
+        const Real vMT = solverMT.valueAt(setup.spot);
+        const Real vFit = solverFitted.valueAt(setup.spot);
+
+        BOOST_CHECK_SMALL(std::fabs(vMT - vFit), 1e-10);
+    }
+}
+
+
+// ── Fallback observability regression tests ──────────────────
+// These tests verify that the additionalResults keys correctly
+// report scheme downgrades at the engine level.
+
+BOOST_AUTO_TEST_CASE(testSolverGatingAdditionalResults) {
+    // Test: when MT is requested with Implicit Euler (non-CN)
+    // time stepping, solver gating fires and the engine's
+    // additionalResults must report the downgrade.
+
+    BOOST_TEST_MESSAGE("Testing solver-gating additionalResults "
+        "reporting...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real S = 100.0, K = 100.0, vol = 0.20;
+    const Rate r = 0.05, q = 0.0;
+    const Date maturity = today + 180;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    // Use Implicit Euler (non-CN) to trigger solver gating.
+    const FdmSchemeDesc ieScheme(FdmSchemeDesc::ImplicitEulerType, 1.0, 0.0);
+
+    BarrierOption option(
+        Barrier::DownOut, 80.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(50), Size(100), Size(0),
+            ieScheme, false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+
+    option.NPV();  // trigger calculation
+
+    const auto& ar = option.additionalResults();
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        true);
+}
+
+BOOST_AUTO_TEST_CASE(testMMatrixFallbackAdditionalResults) {
+    // Test: on a coarse grid with extreme drift (negative q),
+    // MT scheme violates M-matrix property.  The operator-level
+    // fallback fires and must be reported via additionalResults.
+
+    BOOST_TEST_MESSAGE("Testing M-matrix fallback additionalResults "
+        "reporting...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    // Extreme negative q forces large drift, violating M-matrix
+    // on a coarse grid.
+    const Real S = 60.0, K = 60.0, vol = 0.10;
+    const Rate r = 0.05, q = -0.30;
+    const Date maturity = today + 150;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    // Use CN scheme (so solver gating does NOT fire) with coarse
+    // xGrid to force M-matrix violation.
+    BarrierOption option(
+        Barrier::DownOut, 20.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Put, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(40), Size(10), Size(0),
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+
+    option.NPV();
+
+    const auto& ar = option.additionalResults();
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    // Operator-level fallback should fire on this coarse grid.
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("mMatrixFallbackOccurred")),
+        true);
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    // Solver gating should NOT have fired (CN time stepping is valid).
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        false);
+}
+
+BOOST_AUTO_TEST_CASE(testNoFallbackAdditionalResults) {
+    // Test: when ExponentialFitting is requested with CN scheme
+    // and a fine enough grid, no fallback should occur and the
+    // additionalResults must report the scheme unchanged.
+
+    BOOST_TEST_MESSAGE("Testing no-fallback additionalResults "
+        "reporting...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real S = 100.0, K = 100.0, vol = 0.20;
+    const Rate r = 0.05, q = 0.02;
+    const Date maturity = today + 180;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    BarrierOption option(
+        Barrier::DownOut, 80.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(50), Size(100), Size(0),
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::exponentialFitting()));
+
+    option.NPV();
+
+    const auto& ar = option.additionalResults();
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        false);
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("mMatrixFallbackOccurred")),
+        false);
+}
+
+BOOST_AUTO_TEST_CASE(testKnockInAggregationAdditionalResults) {
+    // Discriminating aggregation test: the main barrier-out solver
+    // does NOT trigger any fallback (MT stays clean on a fine grid
+    // with CN time stepping), but the knock-in parity path
+    // (vanilla + rebate - barrierOut) runs sub-solves that DO
+    // trigger M-matrix fallback (the rebate sub-engine uses a
+    // coarser grid with different damping, which can violate the
+    // M-matrix property).
+    //
+    // This proves real aggregation: the top-level DownIn must
+    // report the fallback that came from a sub-solve, not from the
+    // main solver.
+
+    BOOST_TEST_MESSAGE("Testing discriminating knock-in aggregation "
+        "additionalResults...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    // Extreme negative q forces large drift, making M-matrix
+    // violations possible on coarser grids.
+    const Real S = 60.0, K = 60.0, vol = 0.10;
+    const Rate r = 0.05, q = -0.30;
+    const Date maturity = today + 150;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    // CN time stepping (no solver gating), MT spatial scheme.
+    auto payoff = ext::make_shared<PlainVanillaPayoff>(Option::Put, K);
+    auto exercise = ext::make_shared<EuropeanExercise>(maturity);
+
+    // Control: continuous DownOut — main solver only, fine grid.
+    BarrierOption outOption(
+        Barrier::DownOut, 20.0, 2.0, payoff, exercise);
+    outOption.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(40), Size(100), Size(0),
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+    outOption.NPV();
+
+    const auto& arOut = outOption.additionalResults();
+    // The main solver on the fine grid should NOT fallback.
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(arOut.at("spatialSchemeUsed")),
+        std::string("MilevTaglianiCN"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(arOut.at("mMatrixFallbackOccurred")),
+        false);
+
+    // Test: continuous DownIn — parity path runs vanilla + rebate.
+    // The rebate sub-engine uses a coarser grid (xGrid/5 = 20)
+    // which may trigger M-matrix fallback under the extreme drift.
+    BarrierOption inOption(
+        Barrier::DownIn, 20.0, 2.0, payoff, exercise);
+    inOption.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(40), Size(100), Size(0),
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+    inOption.NPV();
+
+    const auto& arIn = inOption.additionalResults();
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(arIn.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    // The aggregated result must show fallback from the sub-solve.
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(arIn.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(arIn.at("mMatrixFallbackOccurred")),
+        true);
+    // Solver gating should NOT have fired (CN time stepping).
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(arIn.at("solverGatingTriggered")),
+        false);
+}
+
+BOOST_AUTO_TEST_CASE(testDiscreteT0KnockInAdditionalResults) {
+    // Test: discrete knock-in with t=0 monitoring where the spot
+    // is outside the barrier at t=0.  This triggers the t=0
+    // early-return path which runs a vanilla PDE solve.  When MT
+    // + Implicit Euler is requested, the vanilla sub-solve triggers
+    // gating.  The top-level engine must report this.
+
+    BOOST_TEST_MESSAGE("Testing discrete t=0 knock-in "
+        "additionalResults...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real S = 100.0, K = 100.0, vol = 0.20;
+    const Rate r = 0.05, q = 0.0;
+    const Date maturity = today + 180;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    // DownIn with barrier=120 > spot=100, so spot IS outside the
+    // [120, +inf) corridor at t=0 → immediate knock-in.
+    // Use Implicit Euler to trigger solver gating in the vanilla solve.
+    const FdmSchemeDesc ieScheme(FdmSchemeDesc::ImplicitEulerType, 1.0, 0.0);
+
+    // Monitoring dates include today.
+    std::vector<Date> monDates = {today, maturity};
+
+    BarrierOption option(
+        Barrier::DownIn, 120.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, monDates,
+            Size(50), Size(100), Size(0),
+            ieScheme, false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+
+    option.NPV();
+
+    const auto& ar = option.additionalResults();
+    // The vanilla sub-solve triggers gating, which must be reported.
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        true);
+}
 
 BOOST_AUTO_TEST_SUITE_END()
 

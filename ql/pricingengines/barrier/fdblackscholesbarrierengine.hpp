@@ -1,3 +1,18 @@
+// ══════════════════════════════════════════════════════════════════
+// FdBlackScholesBarrierEngine — 1-D FDM barrier-option engine
+//
+// Supports two monitoring modes:
+//   Continuous  — Dirichlet BCs at barrier level(s)
+//   Discrete    — FdmDiscreteBarrierStepCondition at monitoring dates
+//
+// The spatial descriptor (FdmBlackScholesSpatialDesc) is threaded
+// through to the solver/operator, allowing the caller to select
+// StandardCentral, ExponentialFitting, or MilevTaglianiCN schemes.
+//
+// Knock-in pricing uses parity: V_in = V_vanilla - V_out.
+// cf. [Ballabio20, Ch. 11] for the FDM barrier framework.
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file fdblackscholesbarrierengine.hpp
     \brief Finite-differences Black/Scholes barrier-option engine
@@ -14,6 +29,12 @@
 
 namespace QuantLib {
 
+    class FdmBlackScholesSolver;
+
+    //! Finite-differences barrier engine (single-barrier only).
+    //! For double-barrier knock-out options (Milev-Tagliani Example 4.1),
+    //! use FdmDiscreteBarrierStepCondition directly with both barriers,
+    //! or a dedicated double-barrier engine such as FdHestonDoubleBarrierEngine.
     class FdBlackScholesBarrierEngine : public BarrierOption::engine {
       public:
         // --- Continuous monitoring constructors (unchanged API) ---
@@ -65,6 +86,16 @@ namespace QuantLib {
       private:
         void calculateContinuous() const;
         void calculateDiscrete() const;
+
+        //! Populate the 4 fallback-observability additionalResults keys
+        //  by aggregating state from the main solver and any sub-option
+        //  instruments (vanilla, rebate) that contributed to the final
+        //  result.  If any contributing solve triggered a fallback, the
+        //  top-level engine reports it.
+        void reportSpatialScheme(
+            const ext::shared_ptr<FdmBlackScholesSolver>& mainSolver,
+            const std::vector<const Instrument*>& subInstruments
+                = std::vector<const Instrument*>()) const;
 
         ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
         DividendSchedule dividends_;

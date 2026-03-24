@@ -1,3 +1,8 @@
+// spatialDesc is threaded through to FdmBlackScholesSolver so that
+// shout option pricing can benefit from the same spatial
+// discretization scheme selected for the broader FDM framework.
+// cf. [Ballabio20, Ch. 10] for the QuantLib vanilla engine pattern.
+
 // r6
 /*! \file fdblackscholesshoutengine.hpp
     \brief Finite-Differences Black Scholes shout option engine

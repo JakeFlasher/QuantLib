@@ -1,3 +1,9 @@
+// ── FdBlackScholesRebateEngine ────────────────────────────────
+// Helper engine for the rebate component of barrier options.
+// spatialDesc is forwarded unchanged to FdmBlackScholesSolver so
+// the rebate PDE uses the same spatial scheme as the main barrier
+// engine.  cf. [Ballabio20, Ch. 11] for the rebate decomposition.
+
 // r6
 #include <ql/exercise.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
@@ -12,6 +18,8 @@
 
 namespace QuantLib {
 
+    // spatialDesc is stored and forwarded to FdmBlackScholesSolver
+    // in calculate() so the rebate pricing uses the caller's scheme.
     FdBlackScholesRebateEngine::FdBlackScholesRebateEngine(
         ext::shared_ptr<GeneralizedBlackScholesProcess> process,
         Size tGrid, Size xGrid, Size dampingSteps,
@@ -109,5 +117,23 @@ namespace QuantLib {
         results_.delta = solver->deltaAt(spot);
         results_.gamma = solver->gammaAt(spot);
         results_.theta = solver->thetaAt(spot);
+
+        // Fallback observability: report spatial scheme state for
+        // aggregation by the parent barrier engine.
+        {
+            const std::string requested = spatialDesc_.schemeName();
+            const bool gating = solver->solverGatingTriggered();
+            const bool mFallback = solver->mMatrixFallbackOccurred();
+            const bool anyFallback = gating || mFallback;
+
+            results_.additionalResults["spatialSchemeRequested"] =
+                requested;
+            results_.additionalResults["spatialSchemeUsed"] =
+                anyFallback ? std::string("ExponentialFitting") : requested;
+            results_.additionalResults["solverGatingTriggered"] =
+                gating;
+            results_.additionalResults["mMatrixFallbackOccurred"] =
+                mFallback;
+        }
     }
 }

@@ -1,3 +1,9 @@
+// spatialDesc is threaded through to FdmBlackScholesSolver so that
+// the rebate pricing uses the same spatial discretization scheme
+// (StandardCentral / ExponentialFitting / MilevTaglianiCN) as the
+// main barrier engine that delegates to this helper.
+// cf. [Ballabio20, Ch. 11] for the rebate engine framework.
+
 // r6
 /*! \file fdblackscholesrebateengine.hpp
     \brief Finite-differences Black/Scholes barrier option rebate helper engine

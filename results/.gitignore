@@ -1,0 +1,5 @@
+# Generated data and figures (reproducible via reproduce.sh)
+
+# CMake build directory
+build/
+__pycache__/

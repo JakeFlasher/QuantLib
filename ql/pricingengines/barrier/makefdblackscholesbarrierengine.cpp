@@ -1,3 +1,17 @@
+// ── MakeFdBlackScholesBarrierEngine — fluent builder ─────────
+// Implements the builder pattern for FdBlackScholesBarrierEngine,
+// following QuantLib conventions (cf. [Ballabio20, §3.3]).
+//
+// withSpatialDesc() selects the spatial discretization scheme
+// (StandardCentral / ExponentialFitting / MilevTaglianiCN).
+//
+// withDiscreteMonitoring() switches from continuous (Dirichlet BC)
+// to discrete (step-condition indicator) barrier monitoring.
+//
+// The conversion operator constructs the engine with all
+// accumulated settings, always using the 4-argument discrete
+// constructor (empty monitoringDates_ falls back to continuous).
+
 // r6
 #include <ql/pricingengines/barrier/makefdblackscholesbarrierengine.hpp>
 #include <ql/pricingengines/barrier/fdblackscholesbarrierengine.hpp>

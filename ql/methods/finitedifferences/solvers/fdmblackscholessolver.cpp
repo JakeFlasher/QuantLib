@@ -1,3 +1,29 @@
+// ══════════════════════════════════════════════════════════════════
+// FdmBlackScholesSolver — 1-D Black-Scholes FDM solver
+//
+// Wraps FdmBlackScholesOp + Fdm1DimSolver with two additional
+// responsibilities:
+//
+//   1. CN-equivalence gating [MT10, Theorem 3.2]:
+//      The Milev-Tagliani scheme requires pure Crank-Nicolson
+//      time stepping (theta = 0.5) with zero damping steps.
+//      If either condition fails, the solver silently downgrades
+//      to ExponentialFitting.  This is now observable via
+//      solverGatingTriggered().
+//
+//   2. Lazy recalculation:
+//      Inherits from LazyObject so that the operator and 1-D solver
+//      are rebuilt only when market data changes.
+//
+// Design rationale for gating at the solver level:
+//   The solver is the only component that knows *both* the spatial
+//   descriptor AND the time-stepping scheme.  The operator only
+//   sees the spatial descriptor; the time-stepping scheme is set
+//   by Fdm1DimSolver.  Therefore gating must happen here, before
+//   the operator is constructed, so that the operator receives the
+//   effective (possibly downgraded) spatial descriptor.
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 #include <ql/methods/finitedifferences/operators/fdmblackscholesop.hpp>
 #include <ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp>
@@ -30,13 +56,18 @@ namespace QuantLib {
         registerWith(quantoHelper_);
     }
 
+    // ── CN-equivalence test [MT10, Theorem 3.2] ─────────────────
+    // In 1D, Douglas and CraigSneyd both reduce to CN because
+    // apply_mixed() returns zero (no cross-derivative term).
+    // The only requirement is theta = 0.5 within numerical tolerance.
     bool FdmBlackScholesSolver::isCrankNicolsonEquivalent1D(
             const FdmSchemeDesc& schemeDesc, Real tol) {
         switch (schemeDesc.type) {
           case FdmSchemeDesc::CrankNicolsonType:
-            return std::fabs(schemeDesc.theta - 0.5) <= tol;
           case FdmSchemeDesc::DouglasType:
-            // Douglas reduces to CN in one dimension
+          case FdmSchemeDesc::CraigSneydType:
+            // Douglas and CraigSneyd reduce to CN in 1D because
+            // the mixed-derivative operator is zero.
             return std::fabs(schemeDesc.theta - 0.5) <= tol;
           default:
             return false;
@@ -46,36 +77,51 @@ namespace QuantLib {
     void FdmBlackScholesSolver::performCalculations() const {
 
         FdmBlackScholesSpatialDesc effectiveDesc = spatialDesc_;
+        solverGatingTriggered_ = false;
 
-        // Gating: Scheme-2 requires CN-equivalent time stepping in 1-D
+        // ── Gating: MT scheme requires CN-equivalent time stepping ──
+        // [MT10, Theorem 3.2] proves non-negative solutions only under
+        // pure Crank-Nicolson (theta = 0.5).  Damping steps prepend
+        // Implicit Euler sub-steps before the main scheme, breaking
+        // CN-equivalence even when theta = 0.5.
+        //
+        // The paper also requires dt < 1/(r*M) for positive distinct
+        // eigenvalues.  The exact bound in log-space may differ from
+        // the S-space result; no runtime check is enforced here.
         if (effectiveDesc.scheme ==
                 FdmBlackScholesSpatialDesc::Scheme
                     ::MilevTaglianiCNEffectiveDiffusion) {
-            if (!isCrankNicolsonEquivalent1D(schemeDesc_)) {
+            if (!isCrankNicolsonEquivalent1D(schemeDesc_)
+                || solverDesc_.dampingSteps > 0) {
                 if (effectiveDesc.mMatrixPolicy ==
                         FdmBlackScholesSpatialDesc::MMatrixPolicy::FailFast) {
                     QL_REQUIRE(false,
                         "Scheme-2 (Milev-Tagliani CN effective diffusion) "
                         "requires a Crank-Nicolson-equivalent time scheme "
-                        "in 1D (CrankNicolsonType or DouglasType with "
-                        "theta=0.5)");
+                        "in 1D (CrankNicolsonType, DouglasType, or "
+                        "CraigSneydType with theta=0.5) and "
+                        "dampingSteps=0");
                 }
+                // Downgrade to ExponentialFitting — record for
+                // observability via solverGatingTriggered().
                 effectiveDesc.scheme =
                     FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting;
+                solverGatingTriggered_ = true;
             }
         }
 
-        const ext::shared_ptr<FdmBlackScholesOp> op(
-            ext::make_shared<FdmBlackScholesOp>(
+        // Store the operator so its mMatrixFallbackOccurred() state
+        // can be queried after the PDE solve completes.
+        op_ = ext::make_shared<FdmBlackScholesOp>(
                 solverDesc_.mesher, process_.currentLink(), strike_,
                 localVol_, illegalLocalVolOverwrite_, 0,
                 (quantoHelper_.empty())
                     ? ext::shared_ptr<FdmQuantoHelper>()
                     : quantoHelper_.currentLink(),
-                effectiveDesc));
+                effectiveDesc);
 
         solver_ = ext::make_shared<Fdm1DimSolver>(
-            solverDesc_, schemeDesc_, op);
+            solverDesc_, schemeDesc_, op_);
     }
 
     Real FdmBlackScholesSolver::valueAt(Real s) const {
@@ -95,6 +141,7 @@ namespace QuantLib {
     }
 
     Real FdmBlackScholesSolver::thetaAt(Real s) const {
+        calculate();
         return solver_->thetaAt(std::log(s));
     }
 }

@@ -1,3 +1,16 @@
+// ══════════════════════════════════════════════════════════════════
+// MakeFdBlackScholesBarrierEngine — fluent builder
+//
+// Provides a step-by-step configuration interface for
+// FdBlackScholesBarrierEngine, following the builder pattern used
+// elsewhere in QuantLib (cf. [Ballabio20, §3.3]).
+//
+// Key builder methods:
+//   withSpatialDesc()        — select spatial scheme
+//   withDiscreteMonitoring() — switch to discrete barrier mode
+//   withTGrid/XGrid/DampingSteps — grid configuration
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file makefdblackscholesbarrierengine.hpp
     \brief Fluent builder for FdBlackScholesBarrierEngine
@@ -17,6 +30,9 @@ namespace QuantLib {
 
     class GeneralizedBlackScholesProcess;
 
+    //! Fluent builder for FdBlackScholesBarrierEngine.
+    //! Note: the underlying engine handles single-barrier instruments only.
+    //! For double-barrier knock-out options, build the FD solver manually.
     class MakeFdBlackScholesBarrierEngine {
       public:
         explicit MakeFdBlackScholesBarrierEngine(

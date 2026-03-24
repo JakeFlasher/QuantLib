@@ -2,9 +2,15 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 /*
- Round-5 validation tests: exact mesh alignment, rebate support,
- engine-level discrete monitoring, and paper-faithful replication
- of Milev-Tagliani Example 4.1 (double barrier knock-out).
+ FdmDiscreteBarrierEngine integration tests.
+
+ Validates: exact mesh alignment at barrier/strike nodes, rebate
+ pass-through, engine-level discrete monitoring with knock-in parity,
+ and paper-faithful replication of [MT10, Example 4.1] (double barrier
+ knock-out with convergence to the analytic reference).
+
+ cf. [MT10, Table 1] for convergence data, [Ballabio20, Ch. 11] for
+ the FDM barrier framework.
 */
 
 #include "toplevelfixture.hpp"
@@ -186,9 +192,7 @@ BOOST_AUTO_TEST_CASE(testDiscreteBarrierRebate) {
     BOOST_TEST_MESSAGE(
         "Testing discrete barrier step condition with non-zero rebate...");
 
-    
     const Size xGrid = 800;
-    const Size tGrid = 200;
     const Real xMin = std::log(50.0);
     const Real xMax = std::log(200.0);
     const Real L = 80.0;
@@ -286,31 +290,25 @@ BOOST_AUTO_TEST_CASE(testDoubleBarrierKnockOutPaperExample) {
 
     const FdmBoundaryConditionSet bcSet;
 
-    // ---- Run with ExponentialFitting + CN ----
-    {
-        FdmBlackScholesSpatialDesc desc = fittedDesc();
-
+    // ---- Run with ExponentialFitting + CN, then MilevTagliani + CN ----
+    struct SchemeCase { FdmBlackScholesSpatialDesc desc; const char* name; };
+    for (const auto& sc : {SchemeCase{fittedDesc(), "ExpFit+CN"},
+                           SchemeCase{milevTaglianiDesc(), "MT+CN"}}) {
         auto op = ext::make_shared<FdmBlackScholesOp>(
             mesher, process, K,
             false, -Null<Real>(), Size(0),
-            ext::shared_ptr<FdmQuantoHelper>(), desc);
+            ext::shared_ptr<FdmQuantoHelper>(), sc.desc);
 
-        FdmSolverDesc solverDesc = {
-            mesher, bcSet, conditions, calculator,
-            maturity, tGrid, 0
-        };
-
+        Array rhs = buildPayoff(mesher, payoff);
         FdmBackwardSolver solver(
             op, bcSet, conditions,
             FdmSchemeDesc::CrankNicolson());
-        
-        Array rhs = buildPayoff(mesher, payoff);
         solver.rollback(rhs, maturity, 0.0, tGrid, 0);
 
         const Real price95  = valueAtSpot(rhs, mesher, 95.0);
         const Real price100 = valueAtSpot(rhs, mesher, 100.0);
 
-        BOOST_TEST_MESSAGE("  ExpFit+CN: V(95)="  << price95
+        BOOST_TEST_MESSAGE("  " << sc.name << ": V(95)="  << price95
                            << ", V(100)=" << price100);
 
         // Prices must be positive
@@ -319,41 +317,8 @@ BOOST_AUTO_TEST_CASE(testDoubleBarrierKnockOutPaperExample) {
         BOOST_CHECK_MESSAGE(price100 >= -1e-10,
             "Negative price at S=100: " << price100);
 
-        // Paper MC: V(95)≈0.174, V(100)≈0.233
+        // Paper MC: V(95)~0.174, V(100)~0.233
         // Tolerance generous due to log-space vs S-space difference
-        BOOST_CHECK_MESSAGE(price95 > 0.10 && price95 < 0.30,
-            "V(95) out of expected range: " << price95);
-        BOOST_CHECK_MESSAGE(price100 > 0.15 && price100 < 0.35,
-            "V(100) out of expected range: " << price100);
-    }
-
-    // ---- Run with MilevTagliani + CN ----
-    {
-        FdmBlackScholesSpatialDesc desc = milevTaglianiDesc();
-
-        auto op = ext::make_shared<FdmBlackScholesOp>(
-            mesher, process, K,
-            false, -Null<Real>(), Size(0),
-            ext::shared_ptr<FdmQuantoHelper>(), desc);
-
-        Array rhs = buildPayoff(mesher, payoff);
-
-        FdmBackwardSolver solver(
-            op, bcSet, conditions,
-            FdmSchemeDesc::CrankNicolson());
-        solver.rollback(rhs, maturity, 0.0, tGrid, 0);
-
-        const Real price95  = valueAtSpot(rhs, mesher, 95.0);
-        const Real price100 = valueAtSpot(rhs, mesher, 100.0);
-
-        BOOST_TEST_MESSAGE("  MT+CN: V(95)="  << price95
-                           << ", V(100)=" << price100);
-
-        BOOST_CHECK_MESSAGE(price95 >= -1e-10,
-            "Negative price at S=95: " << price95);
-        BOOST_CHECK_MESSAGE(price100 >= -1e-10,
-            "Negative price at S=100: " << price100);
-
         BOOST_CHECK_MESSAGE(price95 > 0.10 && price95 < 0.30,
             "V(95) out of expected range: " << price95);
         BOOST_CHECK_MESSAGE(price100 > 0.15 && price100 < 0.35,
@@ -1141,44 +1106,29 @@ BOOST_AUTO_TEST_CASE(testContinuousBarrierNonRegression) {
 
     BOOST_TEST_MESSAGE("  Analytical DownOut: NPV=" << refValue);
 
-    // FD with StandardCentral
-    {
+    // FD with StandardCentral and ExponentialFitting
+    struct DescCase {
+        FdmBlackScholesSpatialDesc desc; const char* name;
+    };
+    for (const auto& dc : {
+            DescCase{FdmBlackScholesSpatialDesc::standard(), "Central"},
+            DescCase{FdmBlackScholesSpatialDesc::exponentialFitting(),
+                     "ExpFit"}}) {
         BarrierOption option(Barrier::DownOut, barrier, 0.0,
                              payoff, exercise);
         option.setPricingEngine(
             ext::make_shared<FdBlackScholesBarrierEngine>(
                 process, 200, 800, 0,
                 FdmSchemeDesc::CrankNicolson(),
-                false, -Null<Real>(),
-                FdmBlackScholesSpatialDesc::standard()));
+                false, -Null<Real>(), dc.desc));
 
         const Real fdValue = option.NPV();
         const Real relErr = std::fabs(fdValue - refValue) / refValue;
 
-        BOOST_TEST_MESSAGE("  Central: NPV=" << fdValue
+        BOOST_TEST_MESSAGE("  " << dc.name << ": NPV=" << fdValue
             << " (err=" << relErr * 100 << "%)");
         BOOST_CHECK_MESSAGE(relErr < 0.02,
-            "Central barrier error " << relErr << " exceeds 2%");
-    }
-
-    // FD with ExponentialFitting
-    {
-        BarrierOption option(Barrier::DownOut, barrier, 0.0,
-                             payoff, exercise);
-        option.setPricingEngine(
-            ext::make_shared<FdBlackScholesBarrierEngine>(
-                process, 200, 800, 0,
-                FdmSchemeDesc::CrankNicolson(),
-                false, -Null<Real>(),
-                FdmBlackScholesSpatialDesc::exponentialFitting()));
-
-        const Real fdValue = option.NPV();
-        const Real relErr = std::fabs(fdValue - refValue) / refValue;
-
-        BOOST_TEST_MESSAGE("  ExpFit: NPV=" << fdValue
-            << " (err=" << relErr * 100 << "%)");
-        BOOST_CHECK_MESSAGE(relErr < 0.02,
-            "ExpFit barrier error " << relErr << " exceeds 2%");
+            dc.name << " barrier error " << relErr << " exceeds 2%");
     }
 }
 
@@ -1240,6 +1190,359 @@ BOOST_AUTO_TEST_CASE(testShoutEngineSmokeTest) {
     BOOST_CHECK_MESSAGE(shoutValue >= euroValue - 0.01,
         "Shout value (" << shoutValue
         << ") should be >= European value (" << euroValue << ")");
+}
+
+
+// ===================================================================
+// 14. Non-European exercise rejection for discrete monitoring
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testDiscreteBarrierRejectsNonEuropeanExercise) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing discrete barrier engine rejects "
+        "American and Bermudan exercise...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    auto process = makeBSProcess(100.0, 0.05, 0.0, 0.25);
+
+    const Date exerciseDate = today + Period(6, Months);
+    const auto payoff =
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, 100.0);
+
+    std::vector<Date> monDates;
+    for (Size i = 1; i <= 3; ++i)
+        monDates.push_back(today + Period(i * 2, Months));
+
+    // American exercise should throw
+    {
+        auto exercise = ext::make_shared<AmericanExercise>(
+            today, exerciseDate);
+        BarrierOption option(Barrier::DownOut, 90.0, 0.0,
+                             payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, monDates, 50, 100, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        BOOST_CHECK_THROW(option.NPV(), Error);
+    }
+
+    // Bermudan exercise should throw
+    {
+        std::vector<Date> bermudanDates;
+        bermudanDates.push_back(today + Period(3, Months));
+        bermudanDates.push_back(exerciseDate);
+        auto exercise = ext::make_shared<BermudanExercise>(bermudanDates);
+        BarrierOption option(Barrier::DownOut, 90.0, 0.0,
+                             payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, monDates, 50, 100, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        BOOST_CHECK_THROW(option.NPV(), Error);
+    }
+
+    // European exercise should succeed
+    {
+        auto exercise = ext::make_shared<EuropeanExercise>(exerciseDate);
+        BarrierOption option(Barrier::DownOut, 90.0, 0.0,
+                             payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, monDates, 50, 100, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        const Real value = option.NPV();
+        BOOST_CHECK_MESSAGE(std::isfinite(value) && value > 0.0,
+            "European discrete barrier should succeed, got " << value);
+    }
+}
+
+
+// ===================================================================
+// 15. t=0 monitoring: spot outside corridor at valuation date
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testValuationDateMonitoringKnockOut) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing t=0 discrete barrier monitoring "
+        "(spot outside corridor at valuation date)...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real spot = 85.0;  // below barrier L=90
+    const Real barrier = 90.0;
+    const Real rebate = 2.0;
+
+    auto process = makeBSProcess(spot, 0.05, 0.0, 0.25);
+
+    const Date exerciseDate = today + Period(6, Months);
+    const auto exercise = ext::make_shared<EuropeanExercise>(exerciseDate);
+    const auto payoff =
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, 100.0);
+
+    // Monitoring dates INCLUDE today (t=0)
+    std::vector<Date> monDatesWithToday;
+    monDatesWithToday.push_back(today);
+    for (Size i = 1; i <= 3; ++i)
+        monDatesWithToday.push_back(today + Period(i * 2, Months));
+
+    // Monitoring dates WITHOUT today
+    std::vector<Date> monDatesNoToday;
+    for (Size i = 1; i <= 3; ++i)
+        monDatesNoToday.push_back(today + Period(i * 2, Months));
+
+    // DownOut with today as monitoring date: spot=85 < barrier=90
+    // should be knocked out immediately → value = rebate (immediate
+    // payment, hit-time rebate semantics, no discounting since t=0)
+    {
+        BarrierOption option(Barrier::DownOut, barrier, rebate,
+                             payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, monDatesWithToday, 50, 100, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        const Real value = option.NPV();
+        const Real expected = rebate;  // immediate payment at t=0
+
+        BOOST_TEST_MESSAGE("  DownOut with t=0 monitoring: NPV="
+            << value << ", expected=" << expected);
+
+        BOOST_CHECK_MESSAGE(
+            std::fabs(value - expected) < 1e-10,
+            "Knocked-out-at-t=0 value should equal immediate rebate "
+            << expected << ", got " << value);
+    }
+
+    // DownOut WITHOUT today: spot=85 outside barrier but no t=0 check.
+    // The PDE starts from unmodified initial condition, so the value
+    // must differ from the immediate-rebate case.
+    {
+        BarrierOption option(Barrier::DownOut, barrier, rebate,
+                             payoff, exercise);
+        option.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, monDatesNoToday, 50, 100, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        const Real value = option.NPV();
+
+        BOOST_TEST_MESSAGE("  DownOut without t=0: NPV=" << value);
+
+        BOOST_CHECK(std::isfinite(value));
+        BOOST_CHECK_MESSAGE(std::fabs(value - rebate) > 0.01,
+            "Without t=0 monitoring, value should differ from "
+            "immediate rebate " << rebate << ", got " << value);
+    }
+
+    // Spot INSIDE corridor with today as monitoring date: prices should
+    // match the non-t=0 baseline (t=0 check is a no-op when inside)
+    {
+        const Real insideSpot = 100.0;  // inside [90, infinity)
+        auto processInside = makeBSProcess(insideSpot, 0.05, 0.0, 0.25);
+
+        // With today in monitoring dates
+        BarrierOption optWith(Barrier::DownOut, barrier, rebate,
+                              payoff, exercise);
+        optWith.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                processInside, monDatesWithToday, 50, 200, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        // Without today
+        BarrierOption optWithout(Barrier::DownOut, barrier, rebate,
+                                 payoff, exercise);
+        optWithout.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                processInside, monDatesNoToday, 50, 200, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        const Real vWith = optWith.NPV();
+        const Real vWithout = optWithout.NPV();
+
+        BOOST_TEST_MESSAGE("  Inside corridor: with t=0="
+            << vWith << ", without t=0=" << vWithout);
+
+        BOOST_CHECK_MESSAGE(
+            std::fabs(vWith - vWithout) < 0.05,
+            "Spot inside corridor: with/without t=0 monitoring "
+            "should be similar. with=" << vWith
+            << ", without=" << vWithout);
+    }
+
+    // DownIn with today as monitoring date: spot=85 < barrier=90
+    // immediately knocked in → price equals vanilla
+    {
+        BarrierOption optionIn(Barrier::DownIn, barrier, 0.0,
+                               payoff, exercise);
+        optionIn.setPricingEngine(
+            ext::make_shared<FdBlackScholesBarrierEngine>(
+                process, monDatesWithToday, 50, 100, 0,
+                FdmSchemeDesc::CrankNicolson()));
+
+        const Real knockInValue = optionIn.NPV();
+
+        // Compare against vanilla FD price
+        VanillaOption vanilla(payoff, exercise);
+        vanilla.setPricingEngine(
+            ext::make_shared<FdBlackScholesVanillaEngine>(
+                process, 50, 100, 0,
+                FdmSchemeDesc::CrankNicolson()));
+        const Real vanillaValue = vanilla.NPV();
+
+        BOOST_TEST_MESSAGE("  DownIn with t=0 monitoring: NPV="
+            << knockInValue << ", vanilla=" << vanillaValue);
+
+        BOOST_CHECK_MESSAGE(
+            std::fabs(knockInValue - vanillaValue) < 0.01,
+            "Knock-in at t=0 should equal vanilla " << vanillaValue
+            << ", got " << knockInValue);
+    }
+}
+
+
+// ===================================================================
+// 16. Multi-point mesher boundary-coincident critical point retention
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testMultiPointMesherBoundaryInclusive) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing multi-point mesher retains critical points "
+        "at domain boundaries (inclusive filtering)...");
+
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    auto process = makeBSProcess(100.0, 0.05, 0.0, 0.25);
+
+    const Real K = 100.0;
+    const Real L = 90.0;
+    const Time maturity = 0.5;
+    const Size xGrid = 200;
+
+    // Helper: true if logTarget appears as a grid node in locs.
+    auto hasNode = [](const std::vector<Real>& locs, Real logTarget) {
+        return std::any_of(locs.begin(), locs.end(),
+            [logTarget](Real x) {
+                return std::fabs(x - logTarget) < 1e-10;
+            });
+    };
+
+    // Helper: verify a mesh is strictly increasing.
+    auto checkStrictlyIncreasing =
+        [](const std::vector<Real>& locs, const std::string& label) {
+        for (Size i = 1; i < locs.size(); ++i) {
+            BOOST_CHECK_MESSAGE(locs[i] > locs[i-1],
+                label << " not strictly increasing at index " << i
+                << ": " << locs[i-1] << " >= " << locs[i]);
+        }
+    };
+
+    // Set xMinConstraint = log(L) so that the lower barrier
+    // is EXACTLY at the domain boundary.
+    const Real xMinConstraint = std::log(L);
+
+    std::vector<std::tuple<Real, Real, bool>> cPoints = {
+        {K, 0.1, true},
+        {L, 0.1, true}  // L is exactly at xMin
+    };
+
+    FdmBlackScholesMesher mesher(
+        xGrid, process, maturity, K,
+        xMinConstraint, Null<Real>(), 0.0001, 1.5,
+        cPoints);
+
+    const auto& locs = mesher.locations();
+
+    BOOST_CHECK_MESSAGE(hasNode(locs, std::log(L)),
+        "Critical point at domain boundary L="
+        << L << " (xMin) should be retained by multi-point mesher");
+
+    checkStrictlyIncreasing(locs, "Main mesh");
+
+    // Test xMax boundary: critical point at upper domain edge
+    {
+        const Real U = 130.0;
+
+        std::vector<std::tuple<Real, Real, bool>> cPts = {
+            {K, 0.1, true},
+            {U, 0.1, true}  // U is exactly at xMax
+        };
+
+        FdmBlackScholesMesher mesherMax(
+            xGrid, process, maturity, K,
+            Null<Real>(), std::log(U), 0.0001, 1.5,
+            cPts);
+
+        BOOST_CHECK_MESSAGE(hasNode(mesherMax.locations(), std::log(U)),
+            "Critical point at xMax boundary U=" << U
+            << " should be retained");
+    }
+
+    // Test boundary-only cPoint: single cPoint at xMin exercising
+    // the Concentrating1dMesher path (not uniform fallback).
+    {
+        std::vector<std::tuple<Real, Real, bool>> cPtsSingle = {
+            {L, 0.1, true}  // only cPoint, exactly at xMin
+        };
+
+        FdmBlackScholesMesher mesherSingle(
+            xGrid, process, maturity, K,
+            xMinConstraint, Null<Real>(), 0.0001, 1.5,
+            cPtsSingle);
+
+        const auto& locsSingle = mesherSingle.locations();
+
+        BOOST_CHECK_MESSAGE(hasNode(locsSingle, std::log(L)),
+            "Boundary-only cPoint should be retained when it is the "
+            "sole concentration point");
+
+        checkStrictlyIncreasing(locsSingle, "Single-cPoint mesh");
+
+        // Prove Concentrating1dMesher was used (not uniform fallback):
+        // a concentrated mesh has non-uniform spacing near the cPoint.
+        const Real uniformH =
+            (locsSingle.back() - locsSingle.front())
+            / (locsSingle.size() - 1);
+        const Real h0 = locsSingle[1] - locsSingle[0];
+        const Real hMid = locsSingle[xGrid/2] - locsSingle[xGrid/2 - 1];
+
+        BOOST_CHECK_MESSAGE(
+            std::fabs(h0 - hMid) / uniformH > 0.01,
+            "Boundary-only cPoint mesh should have non-uniform spacing "
+            "(proves Concentrating1dMesher, not uniform fallback). "
+            "h0=" << h0 << ", hMid=" << hMid
+            << ", uniformH=" << uniformH);
+    }
+
+    // Test far-outside cPoint: a cPoint well below xMin should be
+    // filtered out (negative test)
+    {
+        const Real farBelow = 10.0;  // log(10) << xMin=log(90)
+
+        std::vector<std::tuple<Real, Real, bool>> cPtsFar = {
+            {K, 0.1, true},
+            {farBelow, 0.1, true}  // well outside domain
+        };
+
+        FdmBlackScholesMesher mesherFar(
+            xGrid, process, maturity, K,
+            xMinConstraint, Null<Real>(), 0.0001, 1.5,
+            cPtsFar);
+
+        BOOST_CHECK_MESSAGE(
+            !hasNode(mesherFar.locations(), std::log(farBelow)),
+            "Far-outside cPoint at S=" << farBelow
+            << " should be filtered out, but was found in mesh");
+    }
 }
 
 

@@ -2,11 +2,15 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 /*
- Tests for FdmDiscreteBarrierStepCondition and the paper-faithful
+ FdmDiscreteBarrierStepCondition mechanics tests.
+
+ Validates: tolerant time matching (relative tolerance 1e-10 with
+ max(|a|,|b|) scaling — cf. BL-20260321-relative-tolerance-scaling),
+ knock-out index precomputation, rebate semantics, and the
  demonstration that repeated discrete monitoring injections accumulate
- Crank-Nicolson oscillations under standard central differencing, while
- exponential fitting (Scheme 1) and the Milev-Tagliani CN effective
- diffusion (Scheme 2) suppress them.
+ Crank-Nicolson oscillations under standard central differencing,
+ while ExponentialFitting and MilevTaglianiCN suppress them —
+ cf. [MT10, §4], [Duffy04, §3].
 */
 
 #include "toplevelfixture.hpp"
@@ -444,6 +448,122 @@ BOOST_AUTO_TEST_CASE(testDiscreteBarrierOscillationAccumulation) {
 
         for (Size i = 0; i < result.size(); ++i)
             BOOST_CHECK(std::isfinite(result[i]));
+    }
+}
+
+
+// ===================================================================
+//  Tolerant time matching in discrete barrier step condition
+// ===================================================================
+
+BOOST_AUTO_TEST_CASE(testTolerantTimeMatching) {
+
+    BOOST_TEST_MESSAGE(
+        "Testing tolerant time matching for monitoring times "
+        "(near-miss triggers, far-miss does not)...");
+
+    const Size xGrid = 100;
+    const Real xMin = std::log(50.0);
+    const Real xMax = std::log(200.0);
+    const Real L = 80.0;
+    const Real U = 120.0;
+
+    const auto mesher = ext::make_shared<FdmMesherComposite>(
+        ext::make_shared<Uniform1dMesher>(xMin, xMax, xGrid));
+
+    // Monitoring times at t=0.25 and t=0.50
+    const std::vector<Time> monTimes = {0.25, 0.50};
+
+    FdmDiscreteBarrierStepCondition cond(mesher, monTimes, L, U);
+
+    // Helper: true if applyTo at time t modifies any element.
+    auto testApply = [&](Time t) {
+        Array a(mesher->layout()->size(), 42.0);
+        cond.applyTo(a, t);
+        return std::any_of(a.begin(), a.end(),
+            [](Real v) { return std::fabs(v - 42.0) > 1e-15; });
+    };
+
+    // Exact match: should trigger
+    BOOST_CHECK_MESSAGE(testApply(0.25),
+        "Exact monitoring time 0.25 should trigger barrier");
+    BOOST_CHECK_MESSAGE(testApply(0.50),
+        "Exact monitoring time 0.50 should trigger barrier");
+
+    // Near-miss within tolerance: should trigger
+    BOOST_CHECK_MESSAGE(testApply(0.25 + 1e-13),
+        "Near-miss 0.25+1e-13 should trigger barrier");
+    BOOST_CHECK_MESSAGE(testApply(0.50 - 1e-13),
+        "Near-miss 0.50-1e-13 should trigger barrier");
+
+    // Far from any monitoring time: should NOT trigger
+    BOOST_CHECK_MESSAGE(!testApply(0.10),
+        "Time 0.10 far from monitoring times should NOT trigger");
+    BOOST_CHECK_MESSAGE(!testApply(0.35),
+        "Time 0.35 far from monitoring times should NOT trigger");
+    BOOST_CHECK_MESSAGE(!testApply(0.75),
+        "Time 0.75 far from monitoring times should NOT trigger");
+
+    // Empty monitoring times: should never trigger
+    {
+        FdmDiscreteBarrierStepCondition condEmpty(
+            mesher, std::vector<Time>(), L, U);
+        Array a(mesher->layout()->size(), 42.0);
+        condEmpty.applyTo(a, 0.25);
+        bool anyChanged = std::any_of(a.begin(), a.end(),
+            [](Real v) { return std::fabs(v - 42.0) > 1e-15; });
+        BOOST_CHECK_MESSAGE(!anyChanged,
+            "Empty monitoring times should never trigger barrier");
+    }
+
+    // Short-maturity boundary cases that distinguish the correct
+    // relative tolerance (tol * max(|*it|,|t|)) from the old broken
+    // absolute-like scaling (tol * max(|t|, 1.0)).
+    //
+    // At t=0.25 with tol=1e-10:
+    //   - correct: threshold = 1e-10 * 0.25 = 2.5e-11
+    //   - old:     threshold = 1e-10 * 1.0  = 1.0e-10
+    //
+    // A delta of 5e-11 is INSIDE the old threshold but OUTSIDE the
+    // correct threshold. This test MUST NOT trigger under the correct
+    // implementation (and would spuriously trigger under the old code).
+    {
+        // 5e-11 from lower_bound candidate (above t=0.25):
+        // must NOT match (5e-11 > 2.5e-11 relative threshold)
+        BOOST_CHECK_MESSAGE(!testApply(0.25 + 5e-11),
+            "0.25+5e-11 should NOT trigger: delta 5e-11 exceeds "
+            "relative threshold 2.5e-11 at t=0.25");
+
+        // 5e-11 from predecessor (below t=0.25):
+        // must NOT match
+        BOOST_CHECK_MESSAGE(!testApply(0.25 - 5e-11),
+            "0.25-5e-11 should NOT trigger: delta 5e-11 exceeds "
+            "relative threshold 2.5e-11 at t=0.25");
+
+        // 2e-11 from lower_bound candidate (above):
+        // SHOULD match (2e-11 < 2.5e-11 relative threshold)
+        BOOST_CHECK_MESSAGE(testApply(0.25 + 2e-11),
+            "0.25+2e-11 should trigger: delta 2e-11 is within "
+            "relative threshold 2.5e-11 at t=0.25");
+
+        // 2e-11 from predecessor (below):
+        // SHOULD match
+        BOOST_CHECK_MESSAGE(testApply(0.25 - 2e-11),
+            "0.25-2e-11 should trigger: delta 2e-11 is within "
+            "relative threshold 2.5e-11 at t=0.25");
+
+        // Same test at t=0.50:
+        //   - correct: threshold = 1e-10 * 0.50 = 5e-11
+        //   - old:     threshold = 1e-10 * 1.0  = 1e-10
+        // Delta 8e-11: inside old, outside correct
+        BOOST_CHECK_MESSAGE(!testApply(0.50 + 8e-11),
+            "0.50+8e-11 should NOT trigger: delta 8e-11 exceeds "
+            "relative threshold 5e-11 at t=0.50");
+
+        // Delta 4e-11: inside both
+        BOOST_CHECK_MESSAGE(testApply(0.50 + 4e-11),
+            "0.50+4e-11 should trigger: delta 4e-11 is within "
+            "relative threshold 5e-11 at t=0.50");
     }
 }
 

@@ -2,8 +2,13 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 /*
- Unit tests for the numerically stable x*coth(x) evaluation used
- by exponential fitting and Milev-Tagliani effective diffusion schemes.
+ Unit tests for xCothx — the numerically stable x*coth(x) evaluation
+ used as the exponential fitting factor in the Duffy (2004) spatial
+ discretization scheme — cf. [Duffy04, §4, Eq. 12-13].
+
+ Tests cover: Taylor regime (|x| < 1e-6), direct regime, asymptotic
+ regime (|x| > 50), symmetry (even function), monotonicity, and the
+ lower bound f(x) >= 1.
 */
 
 #include "toplevelfixture.hpp"

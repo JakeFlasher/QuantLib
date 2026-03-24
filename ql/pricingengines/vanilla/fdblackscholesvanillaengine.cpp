@@ -1,3 +1,9 @@
+// ── FdBlackScholesVanillaEngine — cf. [Ballabio20, Ch. 10-11] ──
+// spatialDesc is forwarded to FdmBlackScholesSolver so vanilla
+// pricing uses the caller's spatial discretization scheme.  This
+// engine is also used internally by the barrier engine for
+// knock-in parity: V_in = V_vanilla - V_out.
+
 // r6
 #include <ql/exercise.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
@@ -185,6 +191,25 @@ namespace QuantLib {
         results_.delta = solver->deltaAt(spot);
         results_.gamma = solver->gammaAt(spot);
         results_.theta = solver->thetaAt(spot);
+
+        // Fallback observability: report spatial scheme state so
+        // callers (e.g. barrier engine parity composition) can
+        // aggregate fallback info across sub-solves.
+        {
+            const std::string requested = spatialDesc_.schemeName();
+            const bool gating = solver->solverGatingTriggered();
+            const bool mFallback = solver->mMatrixFallbackOccurred();
+            const bool anyFallback = gating || mFallback;
+
+            results_.additionalResults["spatialSchemeRequested"] =
+                requested;
+            results_.additionalResults["spatialSchemeUsed"] =
+                anyFallback ? std::string("ExponentialFitting") : requested;
+            results_.additionalResults["solverGatingTriggered"] =
+                gating;
+            results_.additionalResults["mMatrixFallbackOccurred"] =
+                mFallback;
+        }
     }
 
     MakeFdBlackScholesVanillaEngine::MakeFdBlackScholesVanillaEngine(

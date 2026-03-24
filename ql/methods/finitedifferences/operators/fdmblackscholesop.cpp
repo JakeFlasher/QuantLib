@@ -1,3 +1,27 @@
+// ══════════════════════════════════════════════════════════════════
+// FdmBlackScholesOp — 1-D Black-Scholes finite-difference operator
+//
+// Assembles the tridiagonal matrix for the log-space BS PDE
+//   dV/dt + a(x) V_xx + mu(x) V_x - r V = 0
+// where x = ln(S), a(x) is the (possibly modified) diffusion
+// coefficient, and mu(x) = r - q - sigma^2/2 is the risk-neutral
+// drift.
+//
+// Three spatial discretization schemes are supported via
+// FdmBlackScholesSpatialDesc::Scheme:
+//
+//   StandardCentral  — a = sigma^2/2 (vanilla central FD)
+//   ExponentialFitting — a = (sigma^2/2) * xCothx(Pe)
+//                        [Duffy04, §4, Eq. 12-13]
+//   MilevTaglianiCNEffectiveDiffusion
+//                     — a = sigma^2/2 + r^2 h^2 / (8 sigma^2)
+//                        [MT10, §3.2]
+//
+// After assembly, an optional M-matrix diagnostic checks the
+// off-diagonal signs and may trigger a fallback to
+// ExponentialFitting if violations are detected.
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
@@ -19,6 +43,27 @@ namespace QuantLib {
 
     namespace {
 
+        // ── Compute effective diffusion coefficient per node ─────
+        // Returns an Array of length n where each entry is the
+        // diffusion coefficient a(x_i) used in the V_xx term.
+        //
+        // For StandardCentral: a = sigma^2 / 2  (handled in the
+        //   switch default, though StandardCentral takes a separate
+        //   fast path in setTime() and never calls this function).
+        //
+        // For ExponentialFitting [Duffy04, §4, Eq. 12-13]:
+        //   Pe_i = mu_i * h_i / sigma_i^2   (cell Peclet number)
+        //   rho_i = xCothx(Pe_i)            (fitting factor >= 1)
+        //   a_i = (sigma_i^2 / 2) * rho_i
+        //
+        // For MilevTaglianiCNEffectiveDiffusion [MT10, §3.2]:
+        //   In S-space the paper adds: a_add = (1/8)(r/sigma)^2 dS^2
+        //   Transforming to log-space x = ln(S) with h = dx:
+        //     a_add = r^2 h^2 / (8 sigma^2)
+        //     a_eff = sigma^2/2 + a_add
+        //   The drift correction (-a_add on V_x) is deliberately
+        //   omitted: it is O(h^2) and bounded by grid discretization
+        //   error, validated by testMilevTaglianiDriftCorrectionAudit().
         Array computeEffectiveDiffusion(
                 const Array& v,
                 const Array& drift,
@@ -32,9 +77,14 @@ namespace QuantLib {
             Array aUsed(n);
 
             for (Size i = 0; i < n; ++i) {
+                // Floor variance at minVariance to prevent division
+                // by zero in the MT and exponential fitting formulas.
                 const Real vEff = std::max(v[i], desc.minVariance);
                 const Real aBase = 0.5 * vEff;
 
+                // Boundary nodes use unmodified diffusion — fitting
+                // is only meaningful at interior nodes where the
+                // second-derivative stencil is complete.
                 if (!isInterior[i]) {
                     aUsed[i] = aBase;
                     continue;
@@ -49,6 +99,10 @@ namespace QuantLib {
 
                 switch (scheme) {
                   case FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting: {
+                    // ── Exponential fitting [Duffy04, §4, Eq. 12-13] ──
+                    // Pe = mu * h / sigma^2 is the cell Peclet number.
+                    // rho = xCothx(Pe) >= 1 scales the diffusion up,
+                    // ensuring positive off-diagonals.
                     const Real Pe = drift[i] * h[i] / vEff;
                     const Real rho = detail::xCothx(Pe, desc.peSmall,
                                                          desc.peLarge);
@@ -56,12 +110,23 @@ namespace QuantLib {
                     break;
                   }
                   case FdmBlackScholesSpatialDesc::Scheme::MilevTaglianiCNEffectiveDiffusion: {
+                    // ── MT effective diffusion [MT10, §3.2] ───────────
+                    // S-space: a_add = (1/8)(r/sigma)^2 * (dS)^2
+                    // Log-space (x = ln S, h = dx):
+                    //   a_add = r^2 * h^2 / (8 * sigma^2)
+                    //   a_eff = sigma^2/2 + a_add
+                    //
+                    // The drift correction (-a_add on V_x) is
+                    // deliberately omitted — see file header.
                     Real aAdd = r * r * h[i] * h[i] / (8.0 * vEff);
+                    // Cap added diffusion to prevent extreme values
+                    // under low-vol / high-rate scenarios.
                     aAdd = std::min(aAdd, desc.maxAddedDiffusionRatio * aBase);
                     aUsed[i] = aBase + aAdd;
                     break;
                   }
                   default:
+                    // StandardCentral or unknown — plain sigma^2/2.
                     aUsed[i] = aBase;
                     break;
                 }
@@ -99,7 +164,10 @@ namespace QuantLib {
         const Rate r = rTS_->forwardRate(t1, t2, Continuous).rate();
         const Rate q = qTS_->forwardRate(t1, t2, Continuous).rate();
 
-        // ---- StandardCentral: original code path, verbatim ----
+        // ── StandardCentral: original code path, verbatim ────────
+        // This path is kept separate for zero overhead when the user
+        // does not request any non-standard scheme.  The operator is
+        // assembled identically to vanilla QuantLib.
         if (spatialDesc_.scheme
                 == FdmBlackScholesSpatialDesc::Scheme::StandardCentral) {
 
@@ -147,10 +215,15 @@ namespace QuantLib {
             return;  // done — no diagnostics needed for baseline
         }
 
-        // ---- Non-standard scheme paths (ExponentialFitting / Scheme-2) ----
+        // ── Non-standard scheme paths (ExponentialFitting / MT) ──
+        // These paths compute per-node variance, drift, and mesh
+        // spacing, then delegate to computeEffectiveDiffusion() for
+        // the scheme-specific diffusion modification.
         const Size n = mesher_->layout()->size();
 
-        // 1. Per-node variance
+        // 1. Per-node variance — sigma_i^2 at the midpoint of [t1, t2].
+        //    Local vol: evaluate at each mesh node.
+        //    Flat vol: use forward variance from the vol surface.
         Array v(n);
         if (localVol_ != nullptr) {
             for (const auto& iter : *mesher_->layout()) {
@@ -173,7 +246,8 @@ namespace QuantLib {
             std::fill(v.begin(), v.end(), vScalar);
         }
 
-        // 2. Per-node drift (including quanto adjustment)
+        // 2. Per-node drift — mu_i = r - q - sigma_i^2/2 in log-space.
+        //    With quanto adjustment if a quanto helper is attached.
         Array drift(n);
         if (quantoHelper_ != nullptr) {
             drift = (r - q) - 0.5 * v
@@ -182,7 +256,10 @@ namespace QuantLib {
             drift = (r - q) - 0.5 * v;
         }
 
-        // 3. Per-node mesh spacing (interior only, boundary-safe)
+        // 3. Per-node mesh spacing h_i — computed from the mesher's
+        //    dminus/dplus at each interior node.  Boundary nodes are
+        //    flagged as non-interior so that fitting is skipped there
+        //    (the boundary stencil is incomplete).
         Array h(n, 0.0);
         std::vector<bool> isInterior(n, false);
         const Size dimDir = mesher_->layout()->dim()[direction_];
@@ -196,6 +273,8 @@ namespace QuantLib {
                 const Real hm = mesher_->dminus(iter, direction_);
                 const Real hp = mesher_->dplus(iter, direction_);
 
+                // HPolicy selects how to combine left/right half-spacings
+                // into a single representative spacing for Peclet/fitting.
                 switch (spatialDesc_.hPolicy) {
                   case FdmBlackScholesSpatialDesc::HPolicy::Average:
                     h[i] = 0.5 * (hm + hp);
@@ -212,15 +291,21 @@ namespace QuantLib {
             }
         }
 
-        // 4. Compute modified diffusion coefficient array
+        // 4. Compute modified diffusion coefficient array.
+        //    Dispatches to the per-node scheme logic.
         Array aUsed = computeEffectiveDiffusion(
             v, drift, h, isInterior, spatialDesc_,
             spatialDesc_.scheme, r);
 
-        // 5. Assemble tridiagonal operator
+        // 5. Assemble tridiagonal operator: A = drift*Dx + aUsed*Dxx - r*I
+        //    This is the standard QuantLib axpyb form.
         mapT_.axpyb(drift, dxMap_, dxxMap_.mult(aUsed), Array(1, -r));
 
-        // 6. Diagnostics & fallback
+        // 6. M-matrix diagnostic & fallback ───────────────────────
+        // After assembly, check whether the tridiagonal operator
+        // satisfies the M-matrix property (non-negative off-diagonals).
+        // If violated and policy = FallbackToExponentialFitting,
+        // recompute with exponential fitting — cf. [MT10, Thm 3.1].
         if (spatialDesc_.mMatrixPolicy
                 != FdmBlackScholesSpatialDesc::MMatrixPolicy::None) {
 
@@ -240,16 +325,19 @@ namespace QuantLib {
                     break;
 
                   case Policy::FallbackToExponentialFitting:
+                    // Recompute diffusion with exponential fitting,
+                    // which guarantees non-negative off-diagonals.
                     if (spatialDesc_.scheme != Scheme::ExponentialFitting) {
                         aUsed = computeEffectiveDiffusion(
                             v, drift, h, isInterior, spatialDesc_,
                             Scheme::ExponentialFitting, r);
                         mapT_.axpyb(drift, dxMap_,
                                     dxxMap_.mult(aUsed), Array(1, -r));
+                        // Record that fallback occurred — observable
+                        // via mMatrixFallbackOccurred() for callers
+                        // that need to report the actual scheme used.
+                        mMatrixFallbackOccurred_ = true;
                     }
-                    break;
-
-                  case Policy::DiagnosticsOnly:
                     break;
 
                   default:
@@ -274,6 +362,7 @@ namespace QuantLib {
         }
     }
 
+    // In 1D there is no cross-derivative term.
     Array FdmBlackScholesOp::apply_mixed(const Array& r) const {
         return Array(r.size(), 0.0);
     }

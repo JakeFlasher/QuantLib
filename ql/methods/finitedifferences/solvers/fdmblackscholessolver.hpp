@@ -1,3 +1,14 @@
+// ══════════════════════════════════════════════════════════════════
+// FdmBlackScholesSolver — 1-D BS FDM solver with CN-equivalence
+// gating for the Milev-Tagliani scheme [MT10, Thm 3.2].
+//
+// spatialDesc is threaded through from the engine; the solver
+// applies gating logic (checking time-stepping scheme and damping
+// steps) before constructing the operator.  If gating triggers,
+// the scheme is downgraded to ExponentialFitting — now observable
+// via solverGatingTriggered().
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file fdmblackscholessolver.hpp
 */
@@ -11,6 +22,7 @@
 #include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
 #include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
 #include <ql/methods/finitedifferences/operators/fdmblackscholesspatialdesc.hpp>
+#include <ql/methods/finitedifferences/operators/fdmblackscholesop.hpp>
 
 namespace QuantLib {
 
@@ -36,6 +48,23 @@ namespace QuantLib {
         Real gammaAt(Real s) const;
         Real thetaAt(Real s) const;
 
+        //! True if solver gating downgraded the requested scheme
+        //  (e.g. MT -> ExponentialFitting due to non-CN time stepping
+        //  or nonzero damping steps).
+        bool solverGatingTriggered() const {
+            calculate();
+            return solverGatingTriggered_;
+        }
+
+        //! True if the operator's M-matrix check triggered a fallback
+        //  from the effective scheme to ExponentialFitting during any
+        //  setTime() call.  This catches cases where solver gating
+        //  did NOT fire but the operator still fell back.
+        bool mMatrixFallbackOccurred() const {
+            calculate();
+            return op_ ? op_->mMatrixFallbackOccurred() : false;
+        }
+
       protected:
         void performCalculations() const override;
 
@@ -52,7 +81,9 @@ namespace QuantLib {
         const Handle<FdmQuantoHelper> quantoHelper_;
         const FdmBlackScholesSpatialDesc spatialDesc_;
 
+        mutable ext::shared_ptr<FdmBlackScholesOp> op_;
         mutable ext::shared_ptr<Fdm1DimSolver> solver_;
+        mutable bool solverGatingTriggered_ = false;
     };
 }
 

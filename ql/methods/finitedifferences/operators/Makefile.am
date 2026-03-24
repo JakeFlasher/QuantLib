@@ -8,6 +8,9 @@ this_include_HEADERS = \
     fdmbatesop.hpp \
     fdmblackscholesfwdop.hpp \
     fdmblackscholesop.hpp \
+    fdmblackscholesspatialdesc.hpp \
+    fdmhyperboliccot.hpp \
+    fdmmatrixdiagnostic.hpp \
     fdmcevop.hpp \
     fdmcirop.hpp \
     fdmg2op.hpp \

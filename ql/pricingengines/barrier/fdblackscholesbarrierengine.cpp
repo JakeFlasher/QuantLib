@@ -1,7 +1,29 @@
+// ══════════════════════════════════════════════════════════════════
+// FdBlackScholesBarrierEngine — FDM barrier engine with both
+// continuous-monitoring (Dirichlet boundary) and discrete-monitoring
+// (step-condition indicator function) paths.
+//
+// Continuous monitoring: uses Dirichlet boundary conditions at the
+//   barrier level(s), clamping the solution to the rebate.  This is
+//   the traditional approach per [Ballabio20, Ch. 11].
+//
+// Discrete monitoring: uses FdmDiscreteBarrierStepCondition to
+//   overwrite knocked-out nodes at each monitoring date.  The grid
+//   extends beyond the barrier (no Dirichlet BCs), and a multi-point
+//   mesher concentrates nodes at both the strike and barrier.
+//   cf. [MT10, Example 4.1] for double-barrier discrete monitoring.
+//
+// Knock-in parity: V_in = V_vanilla - V_out, applied after the
+//   knock-out solve to obtain knock-in prices without a separate PDE.
+//
+// t=0 monitoring: if the spot lies outside the corridor at the
+//   valuation date, the option is immediately knocked out (or in).
+//   cf. BL-20260321-t0-rebate-semantics for rebate handling.
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 #include <ql/exercise.hpp>
 #include <ql/instruments/vanillaoption.hpp>
-#include <ql/math/distributions/normaldistribution.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
 #include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
@@ -190,10 +212,7 @@ namespace QuantLib {
         if (   arguments_.barrierType == Barrier::DownIn
             || arguments_.barrierType == Barrier::UpIn) {
 
-            ext::shared_ptr<StrikedTypePayoff> payoff2 =
-                ext::dynamic_pointer_cast<StrikedTypePayoff>(
-                    arguments_.payoff);
-            VanillaOption vanillaOption(payoff2, arguments_.exercise);
+            VanillaOption vanillaOption(payoff, arguments_.exercise);
             vanillaOption.setPricingEngine(
                 ext::make_shared<FdBlackScholesVanillaEngine>(
                     process_, dividends_, tGrid_, xGrid_,
@@ -204,7 +223,7 @@ namespace QuantLib {
 
             BarrierOption rebateOption(
                 arguments_.barrierType, arguments_.barrier,
-                arguments_.rebate, payoff2, arguments_.exercise);
+                arguments_.rebate, payoff, arguments_.exercise);
 
             const Size min_grid_size = 50;
             const Size rebateDampingSteps =
@@ -230,6 +249,13 @@ namespace QuantLib {
             results_.theta =
                 vanillaOption.theta() + rebateOption.theta()
                 - results_.theta;
+
+            // Aggregate: barrier-out solver + vanilla + rebate.
+            reportSpatialScheme(solver,
+                {&vanillaOption, &rebateOption});
+        } else {
+            // Knock-out only: single solver, no sub-options.
+            reportSpatialScheme(solver);
         }
     }
 
@@ -241,6 +267,9 @@ namespace QuantLib {
             ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
         QL_REQUIRE(payoff, "non-striked type payoff given");
         QL_REQUIRE(payoff->strike() > 0.0, "strike must be positive");
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "only european style options are supported "
+                   "for discrete-monitoring barriers");
 
         const bool isKnockIn =
             (arguments_.barrierType == Barrier::DownIn
@@ -257,7 +286,14 @@ namespace QuantLib {
         const Time maturity =
             process_->time(arguments_.exercise->lastDate());
 
-        // ---- Multi-point mesher (grid extends beyond barrier) ----
+        // ── Multi-point mesher ─────────────────────────────────────
+        // For discrete monitoring the grid must extend BEYOND the
+        // barrier (unlike continuous, which clamps at the barrier).
+        // The multi-point constructor of FdmBlackScholesMesher
+        // concentrates mesh nodes near critical points (strike and
+        // barrier) for accuracy.  The density 0.1 and force-exact
+        // flag ensure these points land exactly on mesh nodes.
+        // cf. BL-20260313-barrier-mesher-cpoints.
         std::vector<std::tuple<Real, Real, bool>> cPoints;
         cPoints.emplace_back(payoff->strike(), 0.1, true);
 
@@ -299,15 +335,12 @@ namespace QuantLib {
             stoppingTimeLists.push_back(divTimes);
         }
 
-        // Monitoring times
-        std::vector<Time> monTimes;
-        for (const auto& d : monitoringDates_) {
-            const Time t = process_->time(d);
-            if (t > 0.0 && t <= maturity)
-                monTimes.push_back(t);
-        }
-
-        // Barrier corridor for a single-barrier instrument
+        // ── Barrier corridor mapping ──────────────────────────────
+        // Single-barrier instruments use a half-open corridor:
+        // DownIn/DownOut: [barrier, +inf)  → lowerBarrier = barrier
+        // UpIn/UpOut:     (0, barrier]     → upperBarrier = barrier
+        // The "infinite" bound (1e15 / 1e-15) is effectively
+        // unreachable on any practical mesh.
         Real lowerBarrier, upperBarrier;
         if (   arguments_.barrierType == Barrier::DownIn
             || arguments_.barrierType == Barrier::DownOut) {
@@ -316,6 +349,62 @@ namespace QuantLib {
         } else {
             lowerBarrier = 1e-15;
             upperBarrier = arguments_.barrier;
+        }
+
+        // Check for t=0 monitoring (valuation-date barrier check).
+        // The paper multiplies the initial condition by 1_[L,U](S),
+        // meaning spot outside the corridor at t=0 is an immediate
+        // knock-out.
+        bool knockedOutAtT0 = false;
+        for (const auto& d : monitoringDates_) {
+            const Time t = process_->time(d);
+            if (std::fabs(t) < 1e-12) {
+                if (spot < lowerBarrier || spot > upperBarrier)
+                    knockedOutAtT0 = true;
+                break;
+            }
+        }
+
+        if (knockedOutAtT0) {
+            if (isKnockIn) {
+                // Knock-in: if knocked out at t=0, the knock-in is
+                // immediately active → price equals vanilla
+                VanillaOption vanillaOption(payoff, arguments_.exercise);
+                vanillaOption.setPricingEngine(
+                    ext::make_shared<FdBlackScholesVanillaEngine>(
+                        process_, dividends_, tGrid_, xGrid_,
+                        0, schemeDesc_, localVol_,
+                        illegalLocalVolOverwrite_,
+                        FdBlackScholesVanillaEngine::Spot,
+                        spatialDesc_));
+                results_.value = vanillaOption.NPV();
+                results_.delta = vanillaOption.delta();
+                results_.gamma = vanillaOption.gamma();
+                results_.theta = vanillaOption.theta();
+                // Aggregate from the vanilla sub-solve (the only
+                // contributing PDE solve on this path).
+                reportSpatialScheme(
+                    ext::shared_ptr<FdmBlackScholesSolver>(),
+                    {&vanillaOption});
+            } else {
+                // Knock-out: immediately dead → rebate paid today.
+                // No PDE solve — report requested scheme with no fallback.
+                results_.value = arguments_.rebate;
+                results_.delta = 0.0;
+                results_.gamma = 0.0;
+                results_.theta = 0.0;
+                reportSpatialScheme(
+                    ext::shared_ptr<FdmBlackScholesSolver>());
+            }
+            return;
+        }
+
+        // Monitoring times (t>0 only; t=0 handled above)
+        std::vector<Time> monTimes;
+        for (const auto& d : monitoringDates_) {
+            const Time t = process_->time(d);
+            if (t > 0.0 && t <= maturity)
+                monTimes.push_back(t);
         }
 
         auto barrierCondition =
@@ -350,7 +439,11 @@ namespace QuantLib {
         results_.gamma = solver->gammaAt(spot);
         results_.theta = solver->thetaAt(spot);
 
-        // Handle knock-in via parity: In = Vanilla - Out
+        // ── Knock-in parity: V_in = V_vanilla - V_out ────────────
+        // Rather than solving a separate PDE for the knock-in, we
+        // use the barrier parity relation: the knock-in price equals
+        // the vanilla price minus the knock-out price.  This avoids
+        // a second PDE solve and is exact by construction.
         if (isKnockIn) {
             VanillaOption vanillaOption(payoff, arguments_.exercise);
             vanillaOption.setPricingEngine(
@@ -365,7 +458,51 @@ namespace QuantLib {
             results_.delta = vanillaOption.delta()  - results_.delta;
             results_.gamma = vanillaOption.gamma()  - results_.gamma;
             results_.theta = vanillaOption.theta()  - results_.theta;
+
+            // Aggregate: barrier-out solver + vanilla sub-option.
+            reportSpatialScheme(solver, {&vanillaOption});
+        } else {
+            // Knock-out only: single solver, no sub-options.
+            reportSpatialScheme(solver);
         }
+    }
+
+    // ── Fallback-observability helper ─────────────────────────
+    // Aggregates fallback state from the main solver AND any
+    // sub-option instruments (vanilla, rebate) that contributed
+    // to the final result.  If ANY contributing solve triggered
+    // a fallback, the top-level engine reports it.
+    void FdBlackScholesBarrierEngine::reportSpatialScheme(
+            const ext::shared_ptr<FdmBlackScholesSolver>& mainSolver,
+            const std::vector<const Instrument*>& subInstruments) const {
+
+        const std::string requested = spatialDesc_.schemeName();
+
+        // Start with the main solver's state (if present).
+        bool gating = mainSolver ? mainSolver->solverGatingTriggered() : false;
+        bool mFallback = mainSolver ? mainSolver->mMatrixFallbackOccurred() : false;
+
+        // Aggregate fallback state from sub-option instruments.
+        // Each sub-engine (vanilla, rebate) populates the same 4
+        // additionalResults keys, so we OR their booleans.
+        for (const auto* inst : subInstruments) {
+            if (!inst) continue;
+            const auto& ar = inst->additionalResults();
+            auto itG = ar.find("solverGatingTriggered");
+            if (itG != ar.end())
+                gating = gating || ext::any_cast<bool>(itG->second);
+            auto itM = ar.find("mMatrixFallbackOccurred");
+            if (itM != ar.end())
+                mFallback = mFallback || ext::any_cast<bool>(itM->second);
+        }
+
+        const bool anyFallback = gating || mFallback;
+
+        results_.additionalResults["spatialSchemeRequested"] = requested;
+        results_.additionalResults["spatialSchemeUsed"] =
+            anyFallback ? std::string("ExponentialFitting") : requested;
+        results_.additionalResults["solverGatingTriggered"] = gating;
+        results_.additionalResults["mMatrixFallbackOccurred"] = mFallback;
     }
 
 }
