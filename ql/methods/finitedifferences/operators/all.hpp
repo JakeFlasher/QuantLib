@@ -5,6 +5,9 @@
 #include <ql/methods/finitedifferences/operators/fdmbatesop.hpp>
 #include <ql/methods/finitedifferences/operators/fdmblackscholesfwdop.hpp>
 #include <ql/methods/finitedifferences/operators/fdmblackscholesop.hpp>
+#include <ql/methods/finitedifferences/operators/fdmblackscholesspatialdesc.hpp>
+#include <ql/methods/finitedifferences/operators/fdmhyperboliccot.hpp>
+#include <ql/methods/finitedifferences/operators/fdmmatrixdiagnostic.hpp>
 #include <ql/methods/finitedifferences/operators/fdmcevop.hpp>
 #include <ql/methods/finitedifferences/operators/fdmcirop.hpp>
 #include <ql/methods/finitedifferences/operators/fdmg2op.hpp>

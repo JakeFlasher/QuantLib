@@ -1,3 +1,26 @@
+// ══════════════════════════════════════════════════════════════════
+// FdBlackScholesBarrierEngine — FDM barrier engine with both
+// continuous-monitoring (Dirichlet boundary) and discrete-monitoring
+// (step-condition indicator function) paths.
+//
+// Continuous monitoring: uses Dirichlet boundary conditions at the
+//   barrier level(s), clamping the solution to the rebate.  This is
+//   the traditional approach per [Ballabio20, Ch. 11].
+//
+// Discrete monitoring: uses FdmDiscreteBarrierStepCondition to
+//   overwrite knocked-out nodes at each monitoring date.  The grid
+//   extends beyond the barrier (no Dirichlet BCs), and a multi-point
+//   mesher concentrates nodes at both the strike and barrier.
+//   cf. [MT10, Example 4.1] for double-barrier discrete monitoring.
+//
+// Knock-in parity: V_in = V_vanilla - V_out, applied after the
+//   knock-out solve to obtain knock-in prices without a separate PDE.
+//
+// t=0 monitoring: if the spot lies outside the corridor at the
+//   valuation date, the option is immediately knocked out (or in).
+//   cf. BL-20260321-t0-rebate-semantics for rebate handling.
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 #include <ql/exercise.hpp>
 #include <ql/instruments/vanillaoption.hpp>
@@ -187,6 +210,19 @@ namespace QuantLib {
         results_.gamma = solver->gammaAt(spot);
         results_.theta = solver->thetaAt(spot);
 
+        // Report whether a fallback from the requested spatial scheme
+        // occurred (solver-level gating).  This makes the previously
+        // silent downgrade observable to callers.
+        if (solver->solverGatingTriggered()) {
+            results_.additionalResults["spatialSchemeUsed"] =
+                std::string("ExponentialFitting");
+            results_.additionalResults["solverGatingTriggered"] =
+                true;
+        } else {
+            results_.additionalResults["solverGatingTriggered"] =
+                false;
+        }
+
         if (   arguments_.barrierType == Barrier::DownIn
             || arguments_.barrierType == Barrier::UpIn) {
 
@@ -260,7 +296,14 @@ namespace QuantLib {
         const Time maturity =
             process_->time(arguments_.exercise->lastDate());
 
-        // ---- Multi-point mesher (grid extends beyond barrier) ----
+        // ── Multi-point mesher ─────────────────────────────────────
+        // For discrete monitoring the grid must extend BEYOND the
+        // barrier (unlike continuous, which clamps at the barrier).
+        // The multi-point constructor of FdmBlackScholesMesher
+        // concentrates mesh nodes near critical points (strike and
+        // barrier) for accuracy.  The density 0.1 and force-exact
+        // flag ensure these points land exactly on mesh nodes.
+        // cf. BL-20260313-barrier-mesher-cpoints.
         std::vector<std::tuple<Real, Real, bool>> cPoints;
         cPoints.emplace_back(payoff->strike(), 0.1, true);
 
@@ -302,7 +345,12 @@ namespace QuantLib {
             stoppingTimeLists.push_back(divTimes);
         }
 
-        // Barrier corridor for a single-barrier instrument
+        // ── Barrier corridor mapping ──────────────────────────────
+        // Single-barrier instruments use a half-open corridor:
+        // DownIn/DownOut: [barrier, +inf)  → lowerBarrier = barrier
+        // UpIn/UpOut:     (0, barrier]     → upperBarrier = barrier
+        // The "infinite" bound (1e15 / 1e-15) is effectively
+        // unreachable on any practical mesh.
         Real lowerBarrier, upperBarrier;
         if (   arguments_.barrierType == Barrier::DownIn
             || arguments_.barrierType == Barrier::DownOut) {
@@ -396,7 +444,22 @@ namespace QuantLib {
         results_.gamma = solver->gammaAt(spot);
         results_.theta = solver->thetaAt(spot);
 
-        // Handle knock-in via parity: In = Vanilla - Out
+        // Report fallback observability for discrete path.
+        if (solver->solverGatingTriggered()) {
+            results_.additionalResults["spatialSchemeUsed"] =
+                std::string("ExponentialFitting");
+            results_.additionalResults["solverGatingTriggered"] =
+                true;
+        } else {
+            results_.additionalResults["solverGatingTriggered"] =
+                false;
+        }
+
+        // ── Knock-in parity: V_in = V_vanilla - V_out ────────────
+        // Rather than solving a separate PDE for the knock-in, we
+        // use the barrier parity relation: the knock-in price equals
+        // the vanilla price minus the knock-out price.  This avoids
+        // a second PDE solve and is exact by construction.
         if (isKnockIn) {
             VanillaOption vanillaOption(payoff, arguments_.exercise);
             vanillaOption.setPricingEngine(

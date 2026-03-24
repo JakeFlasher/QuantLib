@@ -194,7 +194,7 @@ struct FdmBlackScholesSpatialDesc {
     enum Scheme { StandardCentral, ExponentialFitting,
                   MilevTaglianiCNEffectiveDiffusion };
     enum HPolicy { Average, Min, Harmonic };
-    enum MMatrixPolicy { None, DiagnosticsOnly, FailFast,
+    enum MMatrixPolicy { None, FailFast,
                          FallbackToExponentialFitting };
 
     Scheme scheme;

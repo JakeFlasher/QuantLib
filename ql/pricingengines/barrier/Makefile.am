@@ -15,6 +15,7 @@ this_include_HEADERS = \
     discretizedbarrieroption.hpp \
     fdblackscholesbarrierengine.hpp \
     fdblackscholesrebateengine.hpp \
+    makefdblackscholesbarrierengine.hpp \
     fdhestonbarrierengine.hpp \
     fdhestondoublebarrierengine.hpp \
     fdhestonrebateengine.hpp \
@@ -31,6 +32,7 @@ cpp_files = \
     discretizedbarrieroption.cpp \
     fdblackscholesbarrierengine.cpp \
     fdblackscholesrebateengine.cpp \
+    makefdblackscholesbarrierengine.cpp \
     fdhestonbarrierengine.cpp \
     fdhestondoublebarrierengine.cpp \
     fdhestonrebateengine.cpp \

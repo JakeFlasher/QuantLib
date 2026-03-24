@@ -12,6 +12,7 @@
 #include <ql/pricingengines/barrier/discretizedbarrieroption.hpp>
 #include <ql/pricingengines/barrier/fdblackscholesbarrierengine.hpp>
 #include <ql/pricingengines/barrier/fdblackscholesrebateengine.hpp>
+#include <ql/pricingengines/barrier/makefdblackscholesbarrierengine.hpp>
 #include <ql/pricingengines/barrier/fdhestonbarrierengine.hpp>
 #include <ql/pricingengines/barrier/fdhestondoublebarrierengine.hpp>
 #include <ql/pricingengines/barrier/fdhestonrebateengine.hpp>

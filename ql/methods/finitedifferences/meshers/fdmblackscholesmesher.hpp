@@ -1,3 +1,16 @@
+// ══════════════════════════════════════════════════════════════════
+// FdmBlackScholesMesher — 1-D log-space mesher for BS FDM
+//
+// Two construction modes:
+//   Single-point: concentrates nodes at one critical point
+//     (typically the strike) — the original QuantLib interface.
+//   Multi-point: concentrates nodes at multiple critical points
+//     (e.g. strike + barrier(s)) — new for discrete barrier
+//     monitoring where the grid must extend beyond the barrier.
+//     cf. BL-20260313-barrier-mesher-cpoints for the tuple format:
+//     (spot-space level, density, require-exact-node).
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file fdmblackscholesmesher.hpp
     \brief 1-d mesher for the Black-Scholes process (in ln(S))

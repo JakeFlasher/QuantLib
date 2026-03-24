@@ -1,3 +1,15 @@
+// ══════════════════════════════════════════════════════════════════
+// FdmBlackScholesOp — 1-D Black-Scholes finite-difference operator
+//
+// Assembles the tridiagonal matrix for the log-space BS PDE with
+// optional spatial discretization modifications (exponential fitting,
+// Milev-Tagliani effective diffusion, or standard central FD).
+//
+// The spatialDesc parameter controls scheme selection, Peclet
+// thresholds, and M-matrix diagnostic policy.  See
+// fdmblackscholesspatialdesc.hpp for details.
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file fdmblackscholesop.hpp
     \brief Black Scholes linear operator
@@ -41,6 +53,10 @@ namespace QuantLib {
 
         std::vector<SparseMatrix> toMatrixDecomp() const override;
 
+        //! True if any setTime() call triggered M-matrix fallback
+        //  from the requested scheme to ExponentialFitting.
+        bool mMatrixFallbackOccurred() const { return mMatrixFallbackOccurred_; }
+
       private:
         const ext::shared_ptr<FdmMesher> mesher_;
         const ext::shared_ptr<YieldTermStructure> rTS_, qTS_;
@@ -55,6 +71,7 @@ namespace QuantLib {
         const Size direction_;
         const ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
         const FdmBlackScholesSpatialDesc spatialDesc_;
+        mutable bool mMatrixFallbackOccurred_ = false;
     };
 }
 

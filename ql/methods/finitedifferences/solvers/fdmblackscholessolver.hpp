@@ -1,3 +1,14 @@
+// ══════════════════════════════════════════════════════════════════
+// FdmBlackScholesSolver — 1-D BS FDM solver with CN-equivalence
+// gating for the Milev-Tagliani scheme [MT10, Thm 3.2].
+//
+// spatialDesc is threaded through from the engine; the solver
+// applies gating logic (checking time-stepping scheme and damping
+// steps) before constructing the operator.  If gating triggers,
+// the scheme is downgraded to ExponentialFitting — now observable
+// via solverGatingTriggered().
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file fdmblackscholessolver.hpp
 */
@@ -36,6 +47,14 @@ namespace QuantLib {
         Real gammaAt(Real s) const;
         Real thetaAt(Real s) const;
 
+        //! True if solver gating downgraded the requested scheme
+        //  (e.g. MT -> ExponentialFitting due to non-CN time stepping
+        //  or nonzero damping steps).
+        bool solverGatingTriggered() const {
+            calculate();
+            return solverGatingTriggered_;
+        }
+
       protected:
         void performCalculations() const override;
 
@@ -53,6 +72,7 @@ namespace QuantLib {
         const FdmBlackScholesSpatialDesc spatialDesc_;
 
         mutable ext::shared_ptr<Fdm1DimSolver> solver_;
+        mutable bool solverGatingTriggered_ = false;
     };
 }
 

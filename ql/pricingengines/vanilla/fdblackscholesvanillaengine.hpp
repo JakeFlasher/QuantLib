@@ -1,3 +1,9 @@
+// spatialDesc is threaded through to FdmBlackScholesSolver so that
+// vanilla pricing uses the same spatial discretization scheme
+// (StandardCentral / ExponentialFitting / MilevTaglianiCN) as
+// configured by the caller.  This engine is also used internally
+// by the barrier engine for knock-in parity calculations.
+
 // r6
 /*! \file fdblackscholesvanillaengine.hpp
     \brief Finite-differences Black Scholes vanilla option engine

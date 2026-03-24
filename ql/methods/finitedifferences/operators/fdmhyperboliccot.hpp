@@ -1,3 +1,29 @@
+// ══════════════════════════════════════════════════════════════════
+// xCothx — numerically stable evaluation of f(x) = x * coth(x)
+//
+// This is the exponential fitting factor used in the
+// Duffy (2004) diffusion-coefficient modification for
+// central-difference operators on the Black-Scholes PDE.
+//
+// In the fitted scheme the diffusion coefficient becomes
+//   a_fitted = (sigma^2 / 2) * rho
+// where rho = xCothx(Pe) and Pe is the cell Peclet number
+//   Pe = mu * h / sigma^2
+// with mu = r - q - sigma^2/2 (log-space drift) and h = Delta x.
+//
+// cf. [Duffy04, §4, Eq. 12-13].
+//
+// The function is even (f(-x) = f(x)) and always >= 1, which
+// means fitting never reduces the base diffusion — it can only
+// increase it, improving positivity.
+//
+// Three evaluation regimes avoid numerical hazards:
+//   1. |x| < xSmall  — Taylor series (avoids 0/0 in x/tanh(x))
+//   2. xSmall <= |x| <= xLarge — direct std::tanh
+//   3. |x| > xLarge  — asymptotic |x| (avoids overflow in
+//                       exp(2x) inside tanh for large |x|)
+// ══════════════════════════════════════════════════════════════════
+
 /*! \file fdmhyperboliccot.hpp
     \brief numerically stable evaluation of x * coth(x)
 */
@@ -27,14 +53,18 @@ namespace detail {
 
         if (ax < xSmall) {
             // Taylor: x*coth(x) = 1 + x^2/3 - x^4/45 + ...
+            // Two-term truncation; relative error < (x^4/45)/(1) ~ 2e-25
+            // when xSmall = 1e-6.  [Duffy04, §4]
             const Real x2 = x * x;
             return 1.0 + x2 / 3.0;
         }
         if (ax > xLarge) {
-            // coth(x) -> sign(x), so x*coth(x) -> |x|
+            // For |x| >> 1, tanh(x) -> sign(x), so
+            // x * coth(x) = x / tanh(x) -> |x|.
+            // At xLarge = 50 the relative error is ~exp(-100) ~ 0.
             return ax;
         }
-        // General case: stable for moderate arguments
+        // General case: tanh is well-behaved for moderate |x|.
         return x / std::tanh(x);
     }
 

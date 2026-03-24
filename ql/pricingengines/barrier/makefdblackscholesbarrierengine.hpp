@@ -1,3 +1,16 @@
+// ══════════════════════════════════════════════════════════════════
+// MakeFdBlackScholesBarrierEngine — fluent builder
+//
+// Provides a step-by-step configuration interface for
+// FdBlackScholesBarrierEngine, following the builder pattern used
+// elsewhere in QuantLib (cf. [Ballabio20, §3.3]).
+//
+// Key builder methods:
+//   withSpatialDesc()        — select spatial scheme
+//   withDiscreteMonitoring() — switch to discrete barrier mode
+//   withTGrid/XGrid/DampingSteps — grid configuration
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file makefdblackscholesbarrierengine.hpp
     \brief Fluent builder for FdBlackScholesBarrierEngine

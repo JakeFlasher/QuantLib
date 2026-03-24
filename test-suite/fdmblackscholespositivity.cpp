@@ -870,12 +870,14 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
 
     const Time dt = maturity / tGrid;
 
-    // Step 1: DiagnosticsOnly on the coarse mesh — verify violation
+    // Step 1: None policy on the coarse mesh — verify that MT
+    // produces negative off-diagonals (M-matrix violation) when
+    // no corrective action is taken.
     {
         FdmBlackScholesSpatialDesc desc =
             FdmBlackScholesSpatialDesc::milevTaglianiCN();
         desc.mMatrixPolicy =
-            FdmBlackScholesSpatialDesc::MMatrixPolicy::DiagnosticsOnly;
+            FdmBlackScholesSpatialDesc::MMatrixPolicy::None;
 
         auto op = ext::make_shared<FdmBlackScholesOp>(
             mesher, process, K,
@@ -889,9 +891,9 @@ BOOST_AUTO_TEST_CASE(testNegativeDividendYieldMMatrixFallback) {
         Size negCount = countNegativeOffDiag(mat, n, 0.0);
         BOOST_CHECK_MESSAGE(negCount > 0,
             "Expected MT M-matrix violations with negative q on "
-            "coarse grid under DiagnosticsOnly, found " << negCount);
+            "coarse grid with no corrective policy, found " << negCount);
 
-        BOOST_TEST_MESSAGE("  MT+DiagnosticsOnly (coarse): "
+        BOOST_TEST_MESSAGE("  MT+None (coarse): "
             << negCount << " negative off-diag entries");
     }
 

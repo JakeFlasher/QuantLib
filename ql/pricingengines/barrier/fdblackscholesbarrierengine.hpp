@@ -1,3 +1,18 @@
+// ══════════════════════════════════════════════════════════════════
+// FdBlackScholesBarrierEngine — 1-D FDM barrier-option engine
+//
+// Supports two monitoring modes:
+//   Continuous  — Dirichlet BCs at barrier level(s)
+//   Discrete    — FdmDiscreteBarrierStepCondition at monitoring dates
+//
+// The spatial descriptor (FdmBlackScholesSpatialDesc) is threaded
+// through to the solver/operator, allowing the caller to select
+// StandardCentral, ExponentialFitting, or MilevTaglianiCN schemes.
+//
+// Knock-in pricing uses parity: V_in = V_vanilla - V_out.
+// cf. [Ballabio20, Ch. 11] for the FDM barrier framework.
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file fdblackscholesbarrierengine.hpp
     \brief Finite-differences Black/Scholes barrier-option engine
