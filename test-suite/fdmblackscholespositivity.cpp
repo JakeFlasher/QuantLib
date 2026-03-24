@@ -1541,21 +1541,30 @@ BOOST_AUTO_TEST_CASE(testNoFallbackAdditionalResults) {
 }
 
 BOOST_AUTO_TEST_CASE(testKnockInAggregationAdditionalResults) {
-    // Test: continuous knock-in with MT + Implicit Euler forces
-    // solver gating in the vanilla sub-solve.  The top-level
-    // barrier engine must aggregate this and report the downgrade,
-    // even though the main barrier-out solver also triggers gating.
+    // Discriminating aggregation test: the main barrier-out solver
+    // does NOT trigger any fallback (MT stays clean on a fine grid
+    // with CN time stepping), but the knock-in parity path
+    // (vanilla + rebate - barrierOut) runs sub-solves that DO
+    // trigger M-matrix fallback (the rebate sub-engine uses a
+    // coarser grid with different damping, which can violate the
+    // M-matrix property).
+    //
+    // This proves real aggregation: the top-level DownIn must
+    // report the fallback that came from a sub-solve, not from the
+    // main solver.
 
-    BOOST_TEST_MESSAGE("Testing knock-in aggregation "
+    BOOST_TEST_MESSAGE("Testing discriminating knock-in aggregation "
         "additionalResults...");
 
     const DayCounter dc = Actual365Fixed();
     const Date today(28, March, 2004);
     Settings::instance().evaluationDate() = today;
 
-    const Real S = 100.0, K = 100.0, vol = 0.20;
-    const Rate r = 0.05, q = 0.0;
-    const Date maturity = today + 180;
+    // Extreme negative q forces large drift, making M-matrix
+    // violations possible on coarser grids.
+    const Real S = 60.0, K = 60.0, vol = 0.10;
+    const Rate r = 0.05, q = -0.30;
+    const Date maturity = today + 150;
 
     auto process = ext::make_shared<BlackScholesMertonProcess>(
         Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
@@ -1563,34 +1572,58 @@ BOOST_AUTO_TEST_CASE(testKnockInAggregationAdditionalResults) {
         Handle<YieldTermStructure>(flatRate(today, r, dc)),
         Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
 
-    // Continuous knock-in: uses parity = vanilla + rebate - barrierOut.
-    // Implicit Euler forces solver gating in ALL sub-solves.
-    const FdmSchemeDesc ieScheme(FdmSchemeDesc::ImplicitEulerType, 1.0, 0.0);
+    // CN time stepping (no solver gating), MT spatial scheme.
+    auto payoff = ext::make_shared<PlainVanillaPayoff>(Option::Put, K);
+    auto exercise = ext::make_shared<EuropeanExercise>(maturity);
 
-    BarrierOption option(
-        Barrier::DownIn, 80.0, 0.0,
-        ext::make_shared<PlainVanillaPayoff>(Option::Call, K),
-        ext::make_shared<EuropeanExercise>(maturity));
-
-    option.setPricingEngine(
+    // Control: continuous DownOut — main solver only, fine grid.
+    BarrierOption outOption(
+        Barrier::DownOut, 20.0, 2.0, payoff, exercise);
+    outOption.setPricingEngine(
         ext::make_shared<FdBlackScholesBarrierEngine>(
-            process, Size(50), Size(100), Size(0),
-            ieScheme, false, -Null<Real>(),
+            process, Size(40), Size(100), Size(0),
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
             FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+    outOption.NPV();
 
-    option.NPV();
-
-    const auto& ar = option.additionalResults();
-    // The top-level result must report the aggregated fallback.
+    const auto& arOut = outOption.additionalResults();
+    // The main solver on the fine grid should NOT fallback.
     BOOST_CHECK_EQUAL(
-        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        ext::any_cast<std::string>(arOut.at("spatialSchemeUsed")),
         std::string("MilevTaglianiCN"));
     BOOST_CHECK_EQUAL(
-        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        ext::any_cast<bool>(arOut.at("mMatrixFallbackOccurred")),
+        false);
+
+    // Test: continuous DownIn — parity path runs vanilla + rebate.
+    // The rebate sub-engine uses a coarser grid (xGrid/5 = 20)
+    // which may trigger M-matrix fallback under the extreme drift.
+    BarrierOption inOption(
+        Barrier::DownIn, 20.0, 2.0, payoff, exercise);
+    inOption.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(40), Size(100), Size(0),
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+    inOption.NPV();
+
+    const auto& arIn = inOption.additionalResults();
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(arIn.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    // The aggregated result must show fallback from the sub-solve.
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(arIn.at("spatialSchemeUsed")),
         std::string("ExponentialFitting"));
     BOOST_CHECK_EQUAL(
-        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        ext::any_cast<bool>(arIn.at("mMatrixFallbackOccurred")),
         true);
+    // Solver gating should NOT have fired (CN time stepping).
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(arIn.at("solverGatingTriggered")),
+        false);
 }
 
 BOOST_AUTO_TEST_CASE(testDiscreteT0KnockInAdditionalResults) {
