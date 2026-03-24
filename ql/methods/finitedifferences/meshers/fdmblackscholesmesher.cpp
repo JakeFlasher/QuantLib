@@ -17,6 +17,9 @@
 //
 // Domain-bound computation is shared between both constructors
 // via the anonymous-namespace helper computeDomainBounds().
+//
+// cf. [Ballabio20, Ch. 10] for the standard QuantLib FDM mesher
+// framework and the Concentrating1dMesher node-clustering algorithm.
 // ══════════════════════════════════════════════════════════════════
 
 // r6

@@ -29,6 +29,8 @@
 
 namespace QuantLib {
 
+    class FdmBlackScholesSolver;
+
     //! Finite-differences barrier engine (single-barrier only).
     //! For double-barrier knock-out options (Milev-Tagliani Example 4.1),
     //! use FdmDiscreteBarrierStepCondition directly with both barriers,
@@ -84,6 +86,11 @@ namespace QuantLib {
       private:
         void calculateContinuous() const;
         void calculateDiscrete() const;
+
+        //! Populate the 4 fallback-observability additionalResults keys.
+        //  If solver is null (e.g. t=0 early return), report no fallback.
+        void reportSpatialScheme(
+            const ext::shared_ptr<FdmBlackScholesSolver>& solver) const;
 
         ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
         DividendSchedule dividends_;

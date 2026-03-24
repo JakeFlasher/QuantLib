@@ -1,5 +1,6 @@
 // ══════════════════════════════════════════════════════════════════
 // FdmBlackScholesMesher — 1-D log-space mesher for BS FDM
+// cf. [Ballabio20, Ch. 10] for the QuantLib mesher framework.
 //
 // Two construction modes:
 //   Single-point: concentrates nodes at one critical point

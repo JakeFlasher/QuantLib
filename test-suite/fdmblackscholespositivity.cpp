@@ -37,6 +37,8 @@
 #include <ql/methods/finitedifferences/utilities/fdmdirichletboundary.hpp>
 #include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
 #include <ql/math/matrixutilities/sparsematrix.hpp>
+#include <ql/instruments/barrieroption.hpp>
+#include <ql/pricingengines/barrier/fdblackscholesbarrierengine.hpp>
 #include <ql/processes/blackscholesprocess.hpp>
 #include <ql/quotes/simplequote.hpp>
 #include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
@@ -1375,6 +1377,168 @@ BOOST_AUTO_TEST_CASE(testCNGateCraigSneydAccepted) {
     }
 }
 
+
+// ── Fallback observability regression tests ──────────────────
+// These tests verify that the additionalResults keys correctly
+// report scheme downgrades at the engine level.
+
+BOOST_AUTO_TEST_CASE(testSolverGatingAdditionalResults) {
+    // Test: when MT is requested with Implicit Euler (non-CN)
+    // time stepping, solver gating fires and the engine's
+    // additionalResults must report the downgrade.
+
+    BOOST_TEST_MESSAGE("Testing solver-gating additionalResults "
+        "reporting...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real S = 100.0, K = 100.0, vol = 0.20;
+    const Rate r = 0.05, q = 0.0;
+    const Date maturity = today + 180;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    // Use Implicit Euler (non-CN) to trigger solver gating.
+    const FdmSchemeDesc ieScheme(FdmSchemeDesc::ImplicitEulerType, 1.0, 0.0);
+
+    BarrierOption option(
+        Barrier::DownOut, 80.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(50), Size(100), Size(0),
+            ieScheme, false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+
+    option.NPV();  // trigger calculation
+
+    const auto& ar = option.additionalResults();
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        true);
+}
+
+BOOST_AUTO_TEST_CASE(testMMatrixFallbackAdditionalResults) {
+    // Test: on a coarse grid with extreme drift (negative q),
+    // MT scheme violates M-matrix property.  The operator-level
+    // fallback fires and must be reported via additionalResults.
+
+    BOOST_TEST_MESSAGE("Testing M-matrix fallback additionalResults "
+        "reporting...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    // Extreme negative q forces large drift, violating M-matrix
+    // on a coarse grid.
+    const Real S = 60.0, K = 60.0, vol = 0.10;
+    const Rate r = 0.05, q = -0.30;
+    const Date maturity = today + 150;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    // Use CN scheme (so solver gating does NOT fire) with coarse
+    // xGrid to force M-matrix violation.
+    BarrierOption option(
+        Barrier::DownOut, 20.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Put, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(40), Size(10), Size(0),
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+
+    option.NPV();
+
+    const auto& ar = option.additionalResults();
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    // Operator-level fallback should fire on this coarse grid.
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("mMatrixFallbackOccurred")),
+        true);
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    // Solver gating should NOT have fired (CN time stepping is valid).
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        false);
+}
+
+BOOST_AUTO_TEST_CASE(testNoFallbackAdditionalResults) {
+    // Test: when ExponentialFitting is requested with CN scheme
+    // and a fine enough grid, no fallback should occur and the
+    // additionalResults must report the scheme unchanged.
+
+    BOOST_TEST_MESSAGE("Testing no-fallback additionalResults "
+        "reporting...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real S = 100.0, K = 100.0, vol = 0.20;
+    const Rate r = 0.05, q = 0.02;
+    const Date maturity = today + 180;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    BarrierOption option(
+        Barrier::DownOut, 80.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(50), Size(100), Size(0),
+            FdmSchemeDesc::CrankNicolson(),
+            false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::exponentialFitting()));
+
+    option.NPV();
+
+    const auto& ar = option.additionalResults();
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        false);
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("mMatrixFallbackOccurred")),
+        false);
+}
 
 BOOST_AUTO_TEST_SUITE_END()
 

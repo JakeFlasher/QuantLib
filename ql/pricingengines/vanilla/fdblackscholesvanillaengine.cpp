@@ -1,4 +1,4 @@
-// ── FdBlackScholesVanillaEngine ───────────────────────────────
+// ── FdBlackScholesVanillaEngine — cf. [Ballabio20, Ch. 10-11] ──
 // spatialDesc is forwarded to FdmBlackScholesSolver so vanilla
 // pricing uses the caller's spatial discretization scheme.  This
 // engine is also used internally by the barrier engine for

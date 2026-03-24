@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════
-// FdmDiscreteBarrierStepCondition
+// FdmDiscreteBarrierStepCondition — cf. [Ballabio20, Ch. 11]
 //
 // Step condition for discrete barrier monitoring on a 1-D
 // log-space grid.  At each monitoring date the condition
