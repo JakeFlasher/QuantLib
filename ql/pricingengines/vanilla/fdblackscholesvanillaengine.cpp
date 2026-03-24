@@ -191,6 +191,33 @@ namespace QuantLib {
         results_.delta = solver->deltaAt(spot);
         results_.gamma = solver->gammaAt(spot);
         results_.theta = solver->thetaAt(spot);
+
+        // Fallback observability: report spatial scheme state so
+        // callers (e.g. barrier engine parity composition) can
+        // aggregate fallback info across sub-solves.
+        {
+            const bool gating = solver->solverGatingTriggered();
+            const bool mFallback = solver->mMatrixFallbackOccurred();
+            const bool anyFallback = gating || mFallback;
+
+            std::string requested = "StandardCentral";
+            if (spatialDesc_.scheme ==
+                    FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting)
+                requested = "ExponentialFitting";
+            else if (spatialDesc_.scheme ==
+                    FdmBlackScholesSpatialDesc::Scheme
+                        ::MilevTaglianiCNEffectiveDiffusion)
+                requested = "MilevTaglianiCN";
+
+            results_.additionalResults["spatialSchemeRequested"] =
+                requested;
+            results_.additionalResults["spatialSchemeUsed"] =
+                anyFallback ? std::string("ExponentialFitting") : requested;
+            results_.additionalResults["solverGatingTriggered"] =
+                gating;
+            results_.additionalResults["mMatrixFallbackOccurred"] =
+                mFallback;
+        }
     }
 
     MakeFdBlackScholesVanillaEngine::MakeFdBlackScholesVanillaEngine(

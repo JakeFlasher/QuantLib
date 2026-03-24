@@ -253,14 +253,14 @@ namespace QuantLib {
             results_.theta =
                 vanillaOption.theta() + rebateOption.theta()
                 - results_.theta;
-        }
 
-        // Report after all sub-solves complete.  The main barrier-out
-        // solver's fallback state is representative: parity sub-solves
-        // (vanilla, rebate) use identical spatialDesc_/schemeDesc_
-        // parameters, so if gating triggers for the main solve it
-        // would also trigger for the sub-solves.
-        reportSpatialScheme(solver);
+            // Aggregate: barrier-out solver + vanilla + rebate.
+            reportSpatialScheme(solver,
+                {&vanillaOption, &rebateOption});
+        } else {
+            // Knock-out only: single solver, no sub-options.
+            reportSpatialScheme(solver);
+        }
     }
 
     // ---- Discrete-monitoring path ----
@@ -385,18 +385,21 @@ namespace QuantLib {
                 results_.delta = vanillaOption.delta();
                 results_.gamma = vanillaOption.gamma();
                 results_.theta = vanillaOption.theta();
+                // Aggregate from the vanilla sub-solve (the only
+                // contributing PDE solve on this path).
+                reportSpatialScheme(
+                    ext::shared_ptr<FdmBlackScholesSolver>(),
+                    {&vanillaOption});
             } else {
                 // Knock-out: immediately dead → rebate paid today.
-                // The step condition uses hit-time rebate semantics
-                // (immediate payment), so the value is just the rebate
-                // with no further discounting.
+                // No PDE solve — report requested scheme with no fallback.
                 results_.value = arguments_.rebate;
                 results_.delta = 0.0;
                 results_.gamma = 0.0;
                 results_.theta = 0.0;
+                reportSpatialScheme(
+                    ext::shared_ptr<FdmBlackScholesSolver>());
             }
-            // t=0 early return: no PDE solver ran, report no fallback.
-            reportSpatialScheme(ext::shared_ptr<FdmBlackScholesSolver>());
             return;
         }
 
@@ -459,18 +462,23 @@ namespace QuantLib {
             results_.delta = vanillaOption.delta()  - results_.delta;
             results_.gamma = vanillaOption.gamma()  - results_.gamma;
             results_.theta = vanillaOption.theta()  - results_.theta;
-        }
 
-        // Report after all sub-solves (same reasoning as continuous).
-        reportSpatialScheme(solver);
+            // Aggregate: barrier-out solver + vanilla sub-option.
+            reportSpatialScheme(solver, {&vanillaOption});
+        } else {
+            // Knock-out only: single solver, no sub-options.
+            reportSpatialScheme(solver);
+        }
     }
 
     // ── Fallback-observability helper ─────────────────────────
-    // Populates 4 additionalResults keys on every exit path.
-    // If solver is null (e.g. discrete t=0 early return where no
-    // PDE was solved), report the requested scheme with no fallback.
+    // Aggregates fallback state from the main solver AND any
+    // sub-option instruments (vanilla, rebate) that contributed
+    // to the final result.  If ANY contributing solve triggered
+    // a fallback, the top-level engine reports it.
     void FdBlackScholesBarrierEngine::reportSpatialScheme(
-            const ext::shared_ptr<FdmBlackScholesSolver>& solver) const {
+            const ext::shared_ptr<FdmBlackScholesSolver>& mainSolver,
+            const std::vector<const Instrument*>& subInstruments) const {
 
         std::string requested = "StandardCentral";
         if (spatialDesc_.scheme ==
@@ -481,8 +489,24 @@ namespace QuantLib {
                     ::MilevTaglianiCNEffectiveDiffusion)
             requested = "MilevTaglianiCN";
 
-        const bool gating = solver ? solver->solverGatingTriggered() : false;
-        const bool mFallback = solver ? solver->mMatrixFallbackOccurred() : false;
+        // Start with the main solver's state (if present).
+        bool gating = mainSolver ? mainSolver->solverGatingTriggered() : false;
+        bool mFallback = mainSolver ? mainSolver->mMatrixFallbackOccurred() : false;
+
+        // Aggregate fallback state from sub-option instruments.
+        // Each sub-engine (vanilla, rebate) populates the same 4
+        // additionalResults keys, so we OR their booleans.
+        for (const auto* inst : subInstruments) {
+            if (!inst) continue;
+            const auto& ar = inst->additionalResults();
+            auto itG = ar.find("solverGatingTriggered");
+            if (itG != ar.end())
+                gating = gating || ext::any_cast<bool>(itG->second);
+            auto itM = ar.find("mMatrixFallbackOccurred");
+            if (itM != ar.end())
+                mFallback = mFallback || ext::any_cast<bool>(itM->second);
+        }
+
         const bool anyFallback = gating || mFallback;
 
         results_.additionalResults["spatialSchemeRequested"] = requested;

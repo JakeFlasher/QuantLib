@@ -3,6 +3,7 @@
 // (StandardCentral / ExponentialFitting / MilevTaglianiCN) as
 // configured by the caller.  This engine is also used internally
 // by the barrier engine for knock-in parity calculations.
+// cf. [Ballabio20, Ch. 10] for the QuantLib vanilla engine pattern.
 
 // r6
 /*! \file fdblackscholesvanillaengine.hpp

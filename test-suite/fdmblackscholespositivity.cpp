@@ -1540,6 +1540,118 @@ BOOST_AUTO_TEST_CASE(testNoFallbackAdditionalResults) {
         false);
 }
 
+BOOST_AUTO_TEST_CASE(testKnockInAggregationAdditionalResults) {
+    // Test: continuous knock-in with MT + Implicit Euler forces
+    // solver gating in the vanilla sub-solve.  The top-level
+    // barrier engine must aggregate this and report the downgrade,
+    // even though the main barrier-out solver also triggers gating.
+
+    BOOST_TEST_MESSAGE("Testing knock-in aggregation "
+        "additionalResults...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real S = 100.0, K = 100.0, vol = 0.20;
+    const Rate r = 0.05, q = 0.0;
+    const Date maturity = today + 180;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    // Continuous knock-in: uses parity = vanilla + rebate - barrierOut.
+    // Implicit Euler forces solver gating in ALL sub-solves.
+    const FdmSchemeDesc ieScheme(FdmSchemeDesc::ImplicitEulerType, 1.0, 0.0);
+
+    BarrierOption option(
+        Barrier::DownIn, 80.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, Size(50), Size(100), Size(0),
+            ieScheme, false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+
+    option.NPV();
+
+    const auto& ar = option.additionalResults();
+    // The top-level result must report the aggregated fallback.
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        true);
+}
+
+BOOST_AUTO_TEST_CASE(testDiscreteT0KnockInAdditionalResults) {
+    // Test: discrete knock-in with t=0 monitoring where the spot
+    // is outside the barrier at t=0.  This triggers the t=0
+    // early-return path which runs a vanilla PDE solve.  When MT
+    // + Implicit Euler is requested, the vanilla sub-solve triggers
+    // gating.  The top-level engine must report this.
+
+    BOOST_TEST_MESSAGE("Testing discrete t=0 knock-in "
+        "additionalResults...");
+
+    const DayCounter dc = Actual365Fixed();
+    const Date today(28, March, 2004);
+    Settings::instance().evaluationDate() = today;
+
+    const Real S = 100.0, K = 100.0, vol = 0.20;
+    const Rate r = 0.05, q = 0.0;
+    const Date maturity = today + 180;
+
+    auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(S)),
+        Handle<YieldTermStructure>(flatRate(today, q, dc)),
+        Handle<YieldTermStructure>(flatRate(today, r, dc)),
+        Handle<BlackVolTermStructure>(flatVol(today, vol, dc)));
+
+    // DownIn with barrier=120 > spot=100, so spot IS outside the
+    // [120, +inf) corridor at t=0 → immediate knock-in.
+    // Use Implicit Euler to trigger solver gating in the vanilla solve.
+    const FdmSchemeDesc ieScheme(FdmSchemeDesc::ImplicitEulerType, 1.0, 0.0);
+
+    // Monitoring dates include today.
+    std::vector<Date> monDates = {today, maturity};
+
+    BarrierOption option(
+        Barrier::DownIn, 120.0, 0.0,
+        ext::make_shared<PlainVanillaPayoff>(Option::Call, K),
+        ext::make_shared<EuropeanExercise>(maturity));
+
+    option.setPricingEngine(
+        ext::make_shared<FdBlackScholesBarrierEngine>(
+            process, monDates,
+            Size(50), Size(100), Size(0),
+            ieScheme, false, -Null<Real>(),
+            FdmBlackScholesSpatialDesc::milevTaglianiCN()));
+
+    option.NPV();
+
+    const auto& ar = option.additionalResults();
+    // The vanilla sub-solve triggers gating, which must be reported.
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeRequested")),
+        std::string("MilevTaglianiCN"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<std::string>(ar.at("spatialSchemeUsed")),
+        std::string("ExponentialFitting"));
+    BOOST_CHECK_EQUAL(
+        ext::any_cast<bool>(ar.at("solverGatingTriggered")),
+        true);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()

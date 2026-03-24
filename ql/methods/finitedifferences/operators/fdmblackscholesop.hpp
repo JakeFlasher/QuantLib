@@ -8,6 +8,10 @@
 // The spatialDesc parameter controls scheme selection, Peclet
 // thresholds, and M-matrix diagnostic policy.  See
 // fdmblackscholesspatialdesc.hpp for details.
+//
+// cf. [Ballabio20, Ch. 10] for the QuantLib FDM operator framework,
+// [MT10, §3.2] for the MT effective diffusion, [Duffy04, §4] for
+// exponential fitting.
 // ══════════════════════════════════════════════════════════════════
 
 // r6

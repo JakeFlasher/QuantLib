@@ -1,3 +1,4 @@
+// cf. [Ballabio20, Ch. 11] for the QuantLib step-condition framework.
 // r6
 #include <ql/methods/finitedifferences/stepconditions/fdmdiscretebarrierstepcondition.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>

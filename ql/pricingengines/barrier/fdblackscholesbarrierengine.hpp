@@ -87,10 +87,15 @@ namespace QuantLib {
         void calculateContinuous() const;
         void calculateDiscrete() const;
 
-        //! Populate the 4 fallback-observability additionalResults keys.
-        //  If solver is null (e.g. t=0 early return), report no fallback.
+        //! Populate the 4 fallback-observability additionalResults keys
+        //  by aggregating state from the main solver and any sub-option
+        //  instruments (vanilla, rebate) that contributed to the final
+        //  result.  If any contributing solve triggered a fallback, the
+        //  top-level engine reports it.
         void reportSpatialScheme(
-            const ext::shared_ptr<FdmBlackScholesSolver>& solver) const;
+            const ext::shared_ptr<FdmBlackScholesSolver>& mainSolver,
+            const std::vector<const Instrument*>& subInstruments
+                = std::vector<const Instrument*>()) const;
 
         ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
         DividendSchedule dividends_;
