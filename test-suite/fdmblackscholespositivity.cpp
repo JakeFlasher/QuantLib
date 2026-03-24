@@ -2,11 +2,23 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 /*
- Tests that non-standard spatial discretisations (exponential fitting,
- Milev-Tagliani CN-variant) restore positivity and eliminate spurious
- oscillations for discontinuous payoffs under extreme low-volatility
- conditions.  Also validates the Scheme-2 time-scheme gating in the
- solver layer.
+ Positivity preservation and oscillation suppression tests.
+
+ Validates that non-standard spatial discretizations (ExponentialFitting,
+ MilevTaglianiCNEffectiveDiffusion) restore positivity and eliminate
+ spurious oscillations for discontinuous payoffs under extreme
+ low-volatility / high-drift conditions.
+
+ Key theorem-validation tests:
+   - testOscillationElimination: CN oscillations at low vol vanish
+     under ExponentialFitting and MT schemes — cf. [Duffy04, §3]
+   - testMMatrixFallbackWithDiagnostics: verifies M-matrix violation
+     detection and fallback to ExponentialFitting — cf. [MT10, Thm 3.1]
+   - testScheme2GatingFallback: solver gating correctly downgrades
+     MT to ExponentialFitting when CN-equivalence fails —
+     cf. [MT10, Thm 3.2]
+   - testPositivityPreservation: non-negative solution under extreme
+     parameters where standard central FD goes negative
 */
 
 #include "toplevelfixture.hpp"

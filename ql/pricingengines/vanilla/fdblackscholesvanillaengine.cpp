@@ -1,3 +1,9 @@
+// ── FdBlackScholesVanillaEngine ───────────────────────────────
+// spatialDesc is forwarded to FdmBlackScholesSolver so vanilla
+// pricing uses the caller's spatial discretization scheme.  This
+// engine is also used internally by the barrier engine for
+// knock-in parity: V_in = V_vanilla - V_out.
+
 // r6
 #include <ql/exercise.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>

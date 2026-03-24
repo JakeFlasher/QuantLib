@@ -22,6 +22,7 @@
 #include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
 #include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
 #include <ql/methods/finitedifferences/operators/fdmblackscholesspatialdesc.hpp>
+#include <ql/methods/finitedifferences/operators/fdmblackscholesop.hpp>
 
 namespace QuantLib {
 
@@ -55,6 +56,15 @@ namespace QuantLib {
             return solverGatingTriggered_;
         }
 
+        //! True if the operator's M-matrix check triggered a fallback
+        //  from the effective scheme to ExponentialFitting during any
+        //  setTime() call.  This catches cases where solver gating
+        //  did NOT fire but the operator still fell back.
+        bool mMatrixFallbackOccurred() const {
+            calculate();
+            return op_ ? op_->mMatrixFallbackOccurred() : false;
+        }
+
       protected:
         void performCalculations() const override;
 
@@ -71,6 +81,7 @@ namespace QuantLib {
         const Handle<FdmQuantoHelper> quantoHelper_;
         const FdmBlackScholesSpatialDesc spatialDesc_;
 
+        mutable ext::shared_ptr<FdmBlackScholesOp> op_;
         mutable ext::shared_ptr<Fdm1DimSolver> solver_;
         mutable bool solverGatingTriggered_ = false;
     };

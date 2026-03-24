@@ -210,17 +210,33 @@ namespace QuantLib {
         results_.gamma = solver->gammaAt(spot);
         results_.theta = solver->thetaAt(spot);
 
-        // Report whether a fallback from the requested spatial scheme
-        // occurred (solver-level gating).  This makes the previously
-        // silent downgrade observable to callers.
-        if (solver->solverGatingTriggered()) {
+        // ── Fallback observability (AC-3) ─────────────────────────
+        // Report the requested scheme, the actually-used scheme, and
+        // whether each fallback path fired.  This covers both:
+        //   1. Solver gating (MT -> ExpFit due to non-CN or damping)
+        //   2. Operator M-matrix fallback (per-timestep recomputation)
+        {
+            const bool gating = solver->solverGatingTriggered();
+            const bool mFallback = solver->mMatrixFallbackOccurred();
+            const bool anyFallback = gating || mFallback;
+
+            std::string requested = "StandardCentral";
+            if (spatialDesc_.scheme ==
+                    FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting)
+                requested = "ExponentialFitting";
+            else if (spatialDesc_.scheme ==
+                    FdmBlackScholesSpatialDesc::Scheme
+                        ::MilevTaglianiCNEffectiveDiffusion)
+                requested = "MilevTaglianiCN";
+
+            results_.additionalResults["spatialSchemeRequested"] =
+                requested;
             results_.additionalResults["spatialSchemeUsed"] =
-                std::string("ExponentialFitting");
+                anyFallback ? std::string("ExponentialFitting") : requested;
             results_.additionalResults["solverGatingTriggered"] =
-                true;
-        } else {
-            results_.additionalResults["solverGatingTriggered"] =
-                false;
+                gating;
+            results_.additionalResults["mMatrixFallbackOccurred"] =
+                mFallback;
         }
 
         if (   arguments_.barrierType == Barrier::DownIn
@@ -444,15 +460,29 @@ namespace QuantLib {
         results_.gamma = solver->gammaAt(spot);
         results_.theta = solver->thetaAt(spot);
 
-        // Report fallback observability for discrete path.
-        if (solver->solverGatingTriggered()) {
+        // ── Fallback observability (AC-3) — discrete path ─────────
+        {
+            const bool gating = solver->solverGatingTriggered();
+            const bool mFallback = solver->mMatrixFallbackOccurred();
+            const bool anyFallback = gating || mFallback;
+
+            std::string requested = "StandardCentral";
+            if (spatialDesc_.scheme ==
+                    FdmBlackScholesSpatialDesc::Scheme::ExponentialFitting)
+                requested = "ExponentialFitting";
+            else if (spatialDesc_.scheme ==
+                    FdmBlackScholesSpatialDesc::Scheme
+                        ::MilevTaglianiCNEffectiveDiffusion)
+                requested = "MilevTaglianiCN";
+
+            results_.additionalResults["spatialSchemeRequested"] =
+                requested;
             results_.additionalResults["spatialSchemeUsed"] =
-                std::string("ExponentialFitting");
+                anyFallback ? std::string("ExponentialFitting") : requested;
             results_.additionalResults["solverGatingTriggered"] =
-                true;
-        } else {
-            results_.additionalResults["solverGatingTriggered"] =
-                false;
+                gating;
+            results_.additionalResults["mMatrixFallbackOccurred"] =
+                mFallback;
         }
 
         // ── Knock-in parity: V_in = V_vanilla - V_out ────────────

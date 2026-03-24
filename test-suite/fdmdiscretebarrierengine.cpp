@@ -2,9 +2,15 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 /*
- Round-5 validation tests: exact mesh alignment, rebate support,
- engine-level discrete monitoring, and paper-faithful replication
- of Milev-Tagliani Example 4.1 (double barrier knock-out).
+ FdmDiscreteBarrierEngine integration tests.
+
+ Validates: exact mesh alignment at barrier/strike nodes, rebate
+ pass-through, engine-level discrete monitoring with knock-in parity,
+ and paper-faithful replication of [MT10, Example 4.1] (double barrier
+ knock-out with convergence to the analytic reference).
+
+ cf. [MT10, Table 1] for convergence data, [Ballabio20, Ch. 11] for
+ the FDM barrier framework.
 */
 
 #include "toplevelfixture.hpp"

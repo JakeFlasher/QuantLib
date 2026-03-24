@@ -2,11 +2,15 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 /*
- Tests for FdmDiscreteBarrierStepCondition and the paper-faithful
+ FdmDiscreteBarrierStepCondition mechanics tests.
+
+ Validates: tolerant time matching (relative tolerance 1e-10 with
+ max(|a|,|b|) scaling — cf. BL-20260321-relative-tolerance-scaling),
+ knock-out index precomputation, rebate semantics, and the
  demonstration that repeated discrete monitoring injections accumulate
- Crank-Nicolson oscillations under standard central differencing, while
- exponential fitting (Scheme 1) and the Milev-Tagliani CN effective
- diffusion (Scheme 2) suppress them.
+ Crank-Nicolson oscillations under standard central differencing,
+ while ExponentialFitting and MilevTaglianiCN suppress them —
+ cf. [MT10, §4], [Duffy04, §3].
 */
 
 #include "toplevelfixture.hpp"

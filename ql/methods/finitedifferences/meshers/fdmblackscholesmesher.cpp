@@ -1,3 +1,24 @@
+// ══════════════════════════════════════════════════════════════════
+// FdmBlackScholesMesher — 1-D log-space mesher implementation
+//
+// Constructs a non-uniform mesh on x = ln(S) by:
+//   1. Computing domain bounds [xMin, xMax] from the BS forward
+//      envelope (spot * exp(drift * t) +/- scaleFactor * vol * sqrt(t))
+//      with optional xMin/xMaxConstraint overrides for barrier grids.
+//   2. Building a Concentrating1dMesher that clusters nodes near
+//      critical points (strike, barrier levels).
+//
+// The multi-point constructor converts spot-space critical points
+// to log-space, filters duplicates, and passes them to the
+// concentrating mesher.  This is essential for discrete barrier
+// monitoring where the grid must extend beyond the barrier and
+// have nodes aligned to both the strike and barrier levels.
+// cf. BL-20260313-barrier-mesher-cpoints for the tuple convention.
+//
+// Domain-bound computation is shared between both constructors
+// via the anonymous-namespace helper computeDomainBounds().
+// ══════════════════════════════════════════════════════════════════
+
 // r6
 /*! \file fdmblackscholesmesher.cpp
     \brief 1-d mesher for the Black-Scholes process (in ln(S))

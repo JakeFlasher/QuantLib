@@ -1,3 +1,7 @@
+// ── FdBlackScholesShoutEngine ─────────────────────────────────
+// spatialDesc is forwarded to FdmBlackScholesSolver so shout
+// option pricing uses the caller's spatial discretization scheme.
+
 // r6
 /*! \file fdblackscholesshoutengine.cpp
 */

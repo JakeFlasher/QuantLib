@@ -1,5 +1,22 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
+/*
+ Spatial discretization scheme comparison tests.
+
+ Validates: StandardCentral / ExponentialFitting / MilevTaglianiCN
+ produce correct operator structures, Peclet-dependent fitting
+ factors, M-matrix properties, and convergence behavior.
+
+ Key theorem-validation tests:
+   - testMilevTaglianiDriftCorrectionAudit: confirms the deliberately
+     omitted drift correction is O(h^2) bounded by grid error, shrinks
+     on finer meshes — cf. [MT10, §3.2]
+   - testMMatrixCheckStructure: validates off-diagonal sign checks
+     match [MT10, Thm 3.1]
+   - testExponentialFittingPecletRegimes: confirms xCothx fitting
+     factor transitions match [Duffy04, §4, Eq. 12-13]
+*/
+
 #include "toplevelfixture.hpp"
 #include "utilities.hpp"
 

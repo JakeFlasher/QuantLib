@@ -110,17 +110,18 @@ namespace QuantLib {
             }
         }
 
-        const ext::shared_ptr<FdmBlackScholesOp> op(
-            ext::make_shared<FdmBlackScholesOp>(
+        // Store the operator so its mMatrixFallbackOccurred() state
+        // can be queried after the PDE solve completes.
+        op_ = ext::make_shared<FdmBlackScholesOp>(
                 solverDesc_.mesher, process_.currentLink(), strike_,
                 localVol_, illegalLocalVolOverwrite_, 0,
                 (quantoHelper_.empty())
                     ? ext::shared_ptr<FdmQuantoHelper>()
                     : quantoHelper_.currentLink(),
-                effectiveDesc));
+                effectiveDesc);
 
         solver_ = ext::make_shared<Fdm1DimSolver>(
-            solverDesc_, schemeDesc_, op);
+            solverDesc_, schemeDesc_, op_);
     }
 
     Real FdmBlackScholesSolver::valueAt(Real s) const {
