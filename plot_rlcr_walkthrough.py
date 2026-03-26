@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 RLCR Loop Optimization Walkthrough — QuantLib CN Variant Code Review
-Generates a professional, academic-style visual showing the detailed
-review/fix/verify optimization path across 5 rounds + finalize.
+Single-narrative, reference-grade visualization modeled after sol_001_optimization.png.
 """
 
 import matplotlib
@@ -11,246 +10,214 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 
-# ─── Data ────────────────────────────────────────────────────────
+# ─── Source-backed data ──────────────────────────────────────────
 
-# Acceptance criteria (7 total)
-AC_LABELS = [
-    "AC-1: Paper-annotated comments",
-    "AC-2: Dead API removal",
-    "AC-3: Fallback observability",
-    "AC-4: Build integration",
-    "AC-5: Review findings memo",
-    "AC-6: Full test suite pass",
-    "AC-7: Math verification (Codex)",
-]
+# ACs satisfied (categorical, from Codex review verdicts):
+#   R0: AC-2,4,7 fully done; AC-1,3 partial; AC-5,6 not started  → 3/7
+#   R1: +AC-5 done, AC-1,3,6 partial                              → 4/7
+#   R2: +AC-6 done (full ctest), AC-1,3 still partial             → 5/7
+#   R3: +AC-3 done (real aggregation), AC-1 still partial         → 6/7
+#   R4: +AC-1 done (all citations), Codex verdict: "Complete"     → 7/7
+#   Fin: simplification only, all ACs held                         → 7/7
+acs_satisfied = np.array([3, 4, 5, 6, 7, 7])
 
-# AC completion status per round (0=not started, 0.5=partial, 1=complete)
-# Rows: AC-1..AC-7, Columns: R0, R1, R2, R3, R4, Finalize
-ac_status = np.array([
-    # R0    R1    R2    R3    R4    Fin
-    [0.50, 0.70, 0.85, 0.95, 1.00, 1.00],  # AC-1: comments
-    [1.00, 1.00, 1.00, 1.00, 1.00, 1.00],  # AC-2: dead API
-    [0.40, 0.60, 0.75, 1.00, 1.00, 1.00],  # AC-3: observability
-    [1.00, 1.00, 1.00, 1.00, 1.00, 1.00],  # AC-4: build
-    [0.00, 1.00, 1.00, 1.00, 1.00, 1.00],  # AC-5: memo
-    [0.00, 0.50, 1.00, 1.00, 1.00, 1.00],  # AC-6: tests
-    [1.00, 1.00, 1.00, 1.00, 1.00, 1.00],  # AC-7: math
-])
-
-# Aggregate "AC completion score" (out of 7)
-ac_score = ac_status.sum(axis=0)
-
-# Round labels and phases
 round_labels = ["Round 0", "Round 1", "Round 2", "Round 3", "Round 4", "Finalize"]
 round_x = np.arange(len(round_labels))
 
-# Files changed per round
+# Open Codex review issues (cumulative open at end of each round)
+# R0: 8 raised, 0 resolved → 8 open
+# R1: 5 new raised, 6 resolved from R0 backlog → 7 open
+# R2: 4 new, 4 resolved → 7 open  (still had 3 from R1)
+# R3: 2 new, 5 resolved → 4 open
+# R4: 0 new, 4 resolved → 0 open
+# Fin: 0/0 → 0
+open_issues = np.array([8, 7, 7, 4, 0, 0])
+
+# Files changed per commit (source: git diff --stat per round)
 files_changed = [24, 13, 8, 10, 4, 4]
 
-# Tests passing per round (cumulative new test evidence)
-tests_status = [
-    "Partial\n(49 CN)",
-    "Partial\n(49 CN + barrier)",
-    "Full suite\n(206.60s)",
-    "Full suite\n(204.21s)",
-    "Full suite\n(204.42s)",
-    "Full suite\n(204.59s)",
-]
+# Codex verdict per round
+verdicts = ["Fail", "Fail", "Fail", "Fail", "Pass", "N/A"]
 
-# Codex review verdicts
-codex_verdicts = [
-    "Not complete",   # R0
-    "Not complete",   # R1
-    "Not complete",   # R2
-    "Not complete",   # R3
-    "Complete",       # R4
-    "N/A",            # Finalize
-]
-
-# Key milestones (round_idx, short_label)
-milestones = [
-    (0, "Math verified\nDead API removed\n24 files commented"),
-    (1, "Solver observability\n.cpp comments\nTest headers + memo"),
-    (2, "All exit paths\n3 regression tests\nFull ctest pass"),
-    (3, "Real aggregation\nSub-solve OR logic\n5 regression tests"),
-    (4, "Discriminating test\nUmbrella citations"),
-    (5, "schemeName()\nCode dedup"),
-]
-
-# Phase regions (start_round, end_round, label, color)
+# Phase regions (start, end, label, color)
 phases = [
-    (0, 0, "Foundation &\nMath Verification", "#E3F2FD"),
-    (1, 1, "Observability &\nCommenting", "#FFF3E0"),
-    (2, 2, "Coverage &\nVerification", "#F3E5F5"),
-    (3, 3, "Aggregation &\nCitations", "#E8F5E9"),
-    (4, 4, "Discriminating\nTests", "#FFFDE7"),
-    (5, 5, "Simplify &\nFinalize", "#FCE4EC"),
+    (-0.45, 0.45, "Foundation &\nMath Verification", "#BBDEFB"),
+    (0.55,  1.45, "Observability &\nCommenting",     "#FFE0B2"),
+    (1.55,  2.45, "Coverage &\nVerification",        "#E1BEE7"),
+    (2.55,  3.45, "Aggregation &\nCitations",        "#C8E6C9"),
+    (3.55,  4.45, "Discriminating\nTests",           "#FFF9C4"),
+    (4.55,  5.45, "Simplify &\nFinalize",            "#F8BBD0"),
 ]
 
-# Codex issue counts per round
-issues_found     = [8, 5, 4, 2, 0, 0]     # issues found by Codex
-issues_resolved  = [0, 6, 4, 3, 2, 3]     # issues resolved in that round
+# Milestone annotations (round_idx, label, marker_type)
+# marker_type: 'kept' = improvement, 'neutral' = neutral, 'pass' = final pass
+milestones_kept = [
+    (0, "Math verified\nDead API removed\n3/7 ACs"),
+    (1, "Solver observability\nMemo + test headers\n4/7 ACs"),
+    (2, "All exit paths\n3 regression tests\n5/7 ACs"),
+    (3, "Real aggregation\nSub-solve OR logic\n6/7 ACs"),
+    (4, "Discriminating test\nAll citations\n7/7 ACs"),
+]
+milestone_final = (5, "schemeName()\nCode dedup\n7/7 ACs")
 
-# ─── Figure ──────────────────────────────────────────────────────
+# ─── Figure (wide landscape, single dominant panel) ──────────────
 
-fig, axes = plt.subplots(3, 1, figsize=(16, 13.5),
-                          gridspec_kw={'height_ratios': [3.5, 2, 1.8]},
-                          sharex=True)
-fig.subplots_adjust(hspace=0.12, top=0.90, bottom=0.06, left=0.08, right=0.92)
+fig, ax = plt.subplots(figsize=(19, 8.5))
+fig.subplots_adjust(top=0.82, bottom=0.22, left=0.065, right=0.925)
 
-# Title
+# ─── Subtitle line ───────────────────────────────────────────────
+# ─── Title ───────────────────────────────────────────────────────
 fig.suptitle(
     "QuantLib CN Variant Fork: Code Review RLCR Optimization Path\n"
-    "Paper-Annotated Commenting, Fallback Observability & Build Integration",
-    fontsize=14, fontweight='bold', y=0.97,
-)
-fig.text(0.5, 0.925,
-         "5 rounds  |  7 acceptance criteria  |  30 files touched  |  "
-         "5 regression tests  |  Full ctest: 204s",
-         ha='center', fontsize=10, color='#555555')
+    "(Spatial Discretization Scheme Review & Observability Retrofit)",
+    fontsize=15, fontweight='bold', y=0.98)
 
-# ─── Panel 1: AC Completion Trajectory ───────────────────────────
-ax1 = axes[0]
+fig.text(0.5, 0.905,
+         "5 rounds  |  7 acceptance criteria  |  "
+         "29 changed source/header files  |  5 regression tests  |  "
+         "Full ctest: 204 s",
+         ha='center', fontsize=10.5, color='#555555')
 
-# Phase background bands
-for (rs, re, lbl, col) in phases:
-    ax1.axvspan(rs - 0.4, re + 0.4, alpha=0.25, color=col, zorder=0)
-    ax1.text((rs + re) / 2, 7.35, lbl, ha='center', va='bottom',
-             fontsize=7.5, fontstyle='italic', color='#333333')
+# ─── Phase bands ─────────────────────────────────────────────────
+for (x0, x1, lbl, col) in phases:
+    ax.axvspan(x0, x1, alpha=0.22, color=col, zorder=0)
+    ax.text((x0 + x1) / 2, 8.1, lbl, ha='center', va='bottom',
+            fontsize=9, fontstyle='italic', color='#444444',
+            fontweight='medium')
 
-# Plot AC score (main line)
-ax1.plot(round_x, ac_score, 'o-', color='#1B5E20', linewidth=2.5,
-         markersize=10, zorder=5, label='AC completion score (of 7)')
+# ─── Reference baseline ─────────────────────────────────────────
+ax.axhline(y=7.0, color='#43A047', linestyle='--', alpha=0.45,
+           linewidth=1.2, zorder=1)
+ax.text(5.58, 7.08, "all 7 ACs\nsatisfied", fontsize=8.5,
+        color='#2E7D32', ha='left', va='bottom', fontstyle='italic')
 
-# Annotate each point
-for i, (x, y) in enumerate(zip(round_x, ac_score)):
-    verd_color = '#D32F2F' if codex_verdicts[i] == "Not complete" else '#2E7D32'
-    if codex_verdicts[i] != "N/A":
-        ax1.annotate(
-            f"{y:.1f}/7\n{codex_verdicts[i]}",
-            (x, y), textcoords="offset points",
-            xytext=(0, 14), ha='center', fontsize=8,
-            fontweight='bold', color=verd_color,
-            bbox=dict(boxstyle='round,pad=0.2', fc='white', ec=verd_color,
-                      alpha=0.85),
-        )
-    else:
-        ax1.annotate(
-            f"{y:.1f}/7\nFinalized",
-            (x, y), textcoords="offset points",
-            xytext=(0, 14), ha='center', fontsize=8,
-            fontweight='bold', color='#1565C0',
-            bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='#1565C0',
-                      alpha=0.85),
-        )
+# ─── Best-so-far frontier (step line) ───────────────────────────
+best_so_far = np.maximum.accumulate(acs_satisfied)
+ax.step(round_x, best_so_far, where='post', color='#1B5E20',
+        linewidth=2, alpha=0.35, zorder=2, linestyle='-')
 
-# Reference line at 7
-ax1.axhline(y=7.0, color='#2E7D32', linestyle='--', alpha=0.4, linewidth=1)
-ax1.text(5.45, 7.05, "All ACs\nsatisfied", fontsize=7, color='#2E7D32',
-         ha='left', va='bottom')
+# ─── Main trajectory ────────────────────────────────────────────
+ax.plot(round_x, acs_satisfied, '-', color='#1B5E20', linewidth=2.8,
+        zorder=4)
 
-ax1.set_ylabel("Acceptance Criteria Score", fontsize=10)
-ax1.set_ylim(2.5, 8.0)
-ax1.set_xlim(-0.5, 5.7)
-ax1.legend(loc='lower right', fontsize=9)
-ax1.grid(axis='y', alpha=0.3)
+# ─── Per-round markers ──────────────────────────────────────────
 
-# ─── Panel 2: Stacked AC heatmap ────────────────────────────────
-ax2 = axes[1]
+# Kept (improvement) markers — Rounds 0-4
+for rx, lbl in milestones_kept:
+    ax.plot(rx, acs_satisfied[rx], 'o', color='#1B5E20',
+            markersize=12, zorder=5, markeredgewidth=1.5,
+            markeredgecolor='white')
 
-im = ax2.imshow(ac_status, aspect='auto', cmap='RdYlGn', vmin=0, vmax=1,
-                interpolation='nearest')
+# Neutral marker — Finalize (simplify, no AC change)
+rx, lbl = milestone_final
+ax.plot(rx, acs_satisfied[rx], 'o', color='#9E9E9E',
+        markersize=11, zorder=5, markeredgewidth=1.5,
+        markeredgecolor='white')
 
-# Text annotations inside cells
-for i in range(ac_status.shape[0]):
-    for j in range(ac_status.shape[1]):
-        val = ac_status[i, j]
-        txt = {0.0: '--', 0.40: '40%', 0.50: '50%', 0.60: '60%',
-               0.70: '70%', 0.75: '75%', 0.85: '85%', 0.95: '95%',
-               1.0: '\u2713'}.get(val, f'{val:.0%}')
-        color = 'white' if val < 0.4 or val >= 0.85 else 'black'
-        ax2.text(j, i, txt, ha='center', va='center', fontsize=8,
-                 fontweight='bold', color=color)
+# ─── Annotation boxes ───────────────────────────────────────────
+annot_cfg = [
+    # (round, y_offset, label_short, color)
+    (0, -1.6,  "Foundation\n3/7",                "#D32F2F"),
+    (1, +1.1,  "Observability\n4/7",             "#D32F2F"),
+    (2, -1.5,  "Full ctest\n5/7",                "#D32F2F"),
+    (3, +1.1,  "Real aggregation\n6/7",          "#D32F2F"),
+    (4, -1.3,  "All ACs\n7/7",                   "#2E7D32"),
+    (5, +1.0,  "Simplified\n7/7",                "#1565C0"),
+]
 
-ax2.set_yticks(range(len(AC_LABELS)))
-ax2.set_yticklabels(AC_LABELS, fontsize=8)
-ax2.set_xticks(round_x)
-ax2.set_xticklabels(round_labels, fontsize=9)
-ax2.set_title("Per-AC Completion Matrix", fontsize=10, fontweight='bold', pad=6)
+for rx, yoff, lbl, col in annot_cfg:
+    y = acs_satisfied[rx]
+    ax.annotate(
+        lbl, (rx, y),
+        textcoords="offset points",
+        xytext=(0, yoff * 22),
+        ha='center', fontsize=9.5, fontweight='bold', color=col,
+        arrowprops=dict(arrowstyle='->', color=col, lw=1.2),
+        bbox=dict(boxstyle='round,pad=0.35', fc='white', ec=col,
+                  alpha=0.92),
+        zorder=6,
+    )
 
-# Colorbar
-cbar = fig.colorbar(im, ax=ax2, fraction=0.02, pad=0.015)
-cbar.set_label("Completion", fontsize=8)
+# ─── Codex verdict badges ───────────────────────────────────────
+for i in range(len(round_labels)):
+    if verdicts[i] == "Fail":
+        ax.plot(i, 0.5, 'X', color='#D32F2F', markersize=11, zorder=5,
+                markeredgewidth=1.5)
+    elif verdicts[i] == "Pass":
+        ax.plot(i, 0.5, '*', color='#2E7D32', markersize=14, zorder=5,
+                markeredgewidth=0.8)
 
-# ─── Panel 3: Effort + Issues bars ──────────────────────────────
-ax3 = axes[2]
-ax3b = ax3.twinx()
-
-bar_w = 0.30
-x_off = bar_w / 2
-
-# Files changed (left y-axis)
-bars1 = ax3.bar(round_x - x_off, files_changed, bar_w, color='#1565C0',
-                alpha=0.75, label='Files changed', zorder=3)
-
-# Issues resolved (left y-axis, stacked next to files)
-bars2 = ax3.bar(round_x + x_off, issues_resolved, bar_w, color='#2E7D32',
-                alpha=0.75, label='Issues resolved', zorder=3)
-
-# Issues found by Codex (right y-axis, line)
-line = ax3b.plot(round_x, issues_found, 's--', color='#D32F2F', linewidth=1.5,
-                 markersize=7, label='Issues raised by Codex', zorder=4)
-
-# Annotate files bars
-for i, v in enumerate(files_changed):
-    ax3.text(round_x[i] - x_off, v + 0.3, str(v), ha='center',
-             fontsize=7.5, fontweight='bold', color='#1565C0')
-
-# Annotate resolved bars
-for i, v in enumerate(issues_resolved):
+# ─── Open issues secondary line (subtle) ────────────────────────
+ax2 = ax.twinx()
+ax2.bar(round_x, open_issues, width=0.22, color='#EF9A9A', alpha=0.5,
+        zorder=1, label='Open review issues')
+for i, v in enumerate(open_issues):
     if v > 0:
-        ax3.text(round_x[i] + x_off, v + 0.3, str(v), ha='center',
-                 fontsize=7.5, fontweight='bold', color='#2E7D32')
+        ax2.text(i, v + 0.25, str(v), ha='center', fontsize=8,
+                 color='#C62828', fontweight='bold')
+ax2.set_ylabel("Open Review Issues", fontsize=10, color='#C62828')
+ax2.set_ylim(0, 12)
+ax2.tick_params(axis='y', colors='#C62828')
+ax2.legend(loc='upper right', fontsize=9, framealpha=0.9)
 
-# Annotate issues-found markers
-for i, v in enumerate(issues_found):
-    if v > 0:
-        ax3b.text(round_x[i], v + 0.35, str(v), ha='center',
-                  fontsize=7.5, fontweight='bold', color='#D32F2F')
+# ─── Axes formatting ────────────────────────────────────────────
+ax.set_xlim(-0.55, 5.7)
+ax.set_ylim(-0.2, 9.5)
+ax.set_xticks(round_x)
+ax.set_xticklabels(round_labels, fontsize=11, fontweight='medium')
+ax.set_ylabel("Acceptance Criteria Satisfied (of 7)", fontsize=11)
+ax.set_xlabel("Review Round", fontsize=11)
+ax.grid(axis='y', alpha=0.25, zorder=0)
 
-ax3.set_ylabel("Count", fontsize=10, color='#333')
-ax3b.set_ylabel("Codex Issues Found", fontsize=10, color='#D32F2F')
-ax3.set_ylim(0, 28)
-ax3b.set_ylim(0, 10)
-ax3.set_xticks(round_x)
-ax3.set_xticklabels(round_labels, fontsize=9)
-ax3.grid(axis='y', alpha=0.2)
+# ─── Legend (main) ───────────────────────────────────────────────
+legend_elements = [
+    plt.Line2D([0], [0], marker='o', color='#1B5E20', markersize=9,
+               linewidth=2.5, markeredgecolor='white',
+               label='Kept (AC improvement)'),
+    plt.Line2D([0], [0], marker='o', color='#9E9E9E', markersize=9,
+               linewidth=0, markeredgecolor='white',
+               label='Neutral (simplification)'),
+    plt.Line2D([0], [0], marker='X', color='#D32F2F', markersize=9,
+               linewidth=0, markeredgewidth=1.5,
+               label='Codex verdict: not complete'),
+    plt.Line2D([0], [0], marker='*', color='#2E7D32', markersize=11,
+               linewidth=0, label='Codex verdict: complete'),
+    plt.Line2D([0], [0], color='#1B5E20', linestyle='--', alpha=0.5,
+               label='Best so far (frontier)'),
+    plt.Line2D([0], [0], color='#43A047', linestyle='--', alpha=0.5,
+               label='All ACs satisfied'),
+]
+ax.legend(handles=legend_elements, loc='upper left', fontsize=8.5,
+          framealpha=0.92, ncol=3,
+          bbox_to_anchor=(0.0, 1.0))
 
-# Combined legend
-handles1, labels1 = ax3.get_legend_handles_labels()
-handles2, labels2 = ax3b.get_legend_handles_labels()
-ax3.legend(handles1 + handles2, labels1 + labels2, loc='upper right',
-           fontsize=8, ncol=3)
+# ─── Milestone detail boxes along bottom ─────────────────────────
+detail_labels = [
+    "Math verified (Codex)\nDead API removed\n24 files commented",
+    "Solver op_ forwarding\n.cpp + test headers\nReview memo (6 sect.)",
+    "reportSpatialScheme()\n3 regression tests\nctest: 206.60 s",
+    "Sub-instrument OR\nKnock-in + t=0 tests\nctest: 204.21 s",
+    "Discriminating test\nall.hpp citations\nctest: 204.42 s",
+    "schemeName() dedup\nRemove payoff2\nctest: 204.59 s",
+]
+for i, lbl in enumerate(detail_labels):
+    fig.text(0.065 + (i + 0.5) * (0.86 / 6), 0.03, lbl,
+             ha='center', va='bottom', fontsize=7.5,
+             color='#444', fontstyle='italic',
+             bbox=dict(boxstyle='round,pad=0.3', fc='#FAFAFA',
+                       ec='#BDBDBD', alpha=0.92))
 
-ax3.set_title("Effort & Issue Convergence", fontsize=10, fontweight='bold', pad=6)
-
-# ─── Milestone annotations along bottom ─────────────────────────
-for (rx, lbl) in milestones:
-    ax3.text(rx, -5.5, lbl, ha='center', va='top', fontsize=6.5,
-             color='#333', fontstyle='italic',
-             bbox=dict(boxstyle='round,pad=0.3', fc='#F5F5F5', ec='#BDBDBD',
-                       alpha=0.9))
-
-# ─── Info box ────────────────────────────────────────────────────
-info_text = (
+# ─── Info box (bottom right, compact) ────────────────────────────
+info = (
     "QuantLib v1.42 CN Variant Fork\n"
-    "3 spatial schemes: StandardCentral, ExponentialFitting, MilevTaglianiCN\n"
-    "Papers: [MT10], [Duffy04], [Ballabio20]\n"
-    "5 RLCR rounds + Finalize  |  Codex reviewer  |  Full ctest: 204s"
+    "3 schemes: StandardCentral | ExponentialFitting | MilevTaglianiCN\n"
+    "Papers: [MT10]  [Duffy04]  [Ballabio20]\n"
+    "5 rounds + Finalize  |  Codex reviewer  |  Full ctest: 204 s"
 )
-fig.text(0.92, 0.06, info_text, fontsize=7, ha='right', va='bottom',
-         fontfamily='monospace', color='#666',
-         bbox=dict(boxstyle='round,pad=0.5', fc='white', ec='#CCC', alpha=0.9))
+ax.text(5.65, 2.2, info, fontsize=7.5, ha='right', va='bottom',
+        fontfamily='monospace', color='#666',
+        bbox=dict(boxstyle='round,pad=0.5', fc='white', ec='#BBB',
+                  alpha=0.92))
 
 # ─── Save ────────────────────────────────────────────────────────
 output = '/home/jakeshea/QuantLib_huatai2/rlcr_optimization_walkthrough.png'
